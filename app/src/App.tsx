@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pause, Play } from 'lucide-react';
+import { Download, Pause, Play } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -127,6 +127,17 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  const downloadGlsl = () => {
+    if (!selected) return;
+    const blob = new Blob([selected.source], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selected.id}.glsl`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Defaults under values: on a shader switch `values` lags one render, so a
   // new control could otherwise read an undefined key. Defaults backfill any
   // missing key; edits in `values` win. Then sanitize (clamp) on read.
@@ -180,6 +191,17 @@ export default function App() {
                 requiresShape={requiresShape}
               />
             </>
+          )}
+          {selected && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Download .glsl"
+              title="Download .glsl"
+              onClick={downloadGlsl}
+            >
+              <Download />
+            </Button>
           )}
           {selected && (
             <Button
