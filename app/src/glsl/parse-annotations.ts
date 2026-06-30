@@ -22,16 +22,16 @@ export interface ParsedUniform {
   name: string;
   glslType: string;
   role: UniformRole;
-  control?: 'slider' | 'number' | 'color' | 'image';
+  control?: 'slider' | 'number' | 'color' | 'image' | 'select' | 'bezier';
   label?: string;
   hint?: string;
-  default?: number | string;
+  default?: number | string | number[];
   min?: number;
   max?: number;
 }
 
-/** Setting values are keyed by uniform name: number for floats, hex for colors. */
-export type ShaderValues = Record<string, number | string>;
+/** Setting values are keyed by uniform name: number for floats, hex for colors, tuple for bezier. */
+export type ShaderValues = Record<string, number | string | number[]>;
 
 export interface ParsedShader {
   uniforms: ParsedUniform[];
@@ -151,6 +151,16 @@ export function parseShader(source: string): ParsedShader {
       u.control = 'color';
       u.default = normalizeHex(values.default ?? '') ?? '#000000';
       schema.push({ key: name, label, hint, kind: 'color' });
+    } else if (glslType === 'vec4' && flags.has('bezier')) {
+      u.control = 'bezier';
+      const parts = (values.default ?? '0.25, 0.1, 0.25, 1.0').split(',').map((s) => Number(s.trim()));
+      u.default = parts.length === 4 ? parts : [0.25, 0.1, 0.25, 1.0];
+      schema.push({ key: name, label, hint, kind: 'bezier' });
+    } else if (glslType === 'float' && values.select) {
+      u.control = 'select';
+      const options = values.select.split(',').map((s, i) => ({ value: String(i), label: s.trim() }));
+      u.default = values.default !== undefined ? String(Number(values.default)) : '0';
+      schema.push({ key: name, label, hint, kind: 'select', options });
     } else if (glslType === 'float') {
       u.default = values.default !== undefined ? Number(values.default) : 0;
       if (values.range) {

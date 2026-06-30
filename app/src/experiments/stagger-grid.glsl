@@ -53,15 +53,14 @@ uniform float u_speed;
 uniform float u_jitter;
 
 /**
- * Easing mode: 0 = power, 1 = cubic bezier.
- * @label Ease Mode
- * @default 0.0
- * @range 0, 1
+ * @label Easing
+ * @select Power, Cubic Bezier
+ * @default 0
  */
 uniform float u_easeMode;
 
 /**
- * Power exponent (power mode). 1 = linear, 2 = quad, 3 = cubic.
+ * Power exponent. 1 = linear, 2 = quad, 3 = cubic.
  * @label Power
  * @default 2.0
  * @range 1, 5
@@ -69,44 +68,18 @@ uniform float u_easeMode;
 uniform float u_easePower;
 
 /**
- * Direction (power mode): 0 = in, 1 = out, 2 = in-out.
  * @label Direction
- * @default 1.0
- * @range 0, 2
+ * @select In, Out, In-Out
+ * @default 1
  */
 uniform float u_easeDir;
 
 /**
- * Bezier control point 1 X (bezier mode).
- * @label Bez X1
- * @default 0.42
- * @range 0, 1
+ * @label Easing Curve
+ * @bezier
+ * @default 0.42, 0.0, 0.58, 1.0
  */
-uniform float u_bezX1;
-
-/**
- * Bezier control point 1 Y (bezier mode). Values outside 0–1 overshoot.
- * @label Bez Y1
- * @default 0.0
- * @range -0.5, 1.5
- */
-uniform float u_bezY1;
-
-/**
- * Bezier control point 2 X (bezier mode).
- * @label Bez X2
- * @default 0.58
- * @range 0, 1
- */
-uniform float u_bezX2;
-
-/**
- * Bezier control point 2 Y (bezier mode). Values outside 0–1 overshoot.
- * @label Bez Y2
- * @default 1.0
- * @range -0.5, 1.5
- */
-uniform float u_bezY2;
+uniform vec4 u_bezier;
 
 /**
  * @label Color A
@@ -152,7 +125,7 @@ float applyEasing(float t) {
   t = clamp(t, 0.0, 1.0);
   float mode = floor(u_easeMode + 0.5);
   if (mode < 0.5) return powerEase(t, u_easePower, u_easeDir);
-  return cubicBezier(t, u_bezX1, u_bezY1, u_bezX2, u_bezY2);
+  return cubicBezier(t, u_bezier.x, u_bezier.y, u_bezier.z, u_bezier.w);
 }
 
 void main() {

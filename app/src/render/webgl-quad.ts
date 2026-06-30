@@ -219,6 +219,8 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       } else if (u.type === gl!.FLOAT_VEC3 && typeof val === 'string') {
         const c = hexToRgb(val);
         gl!.uniform3f(u.location, c.r / 255, c.g / 255, c.b / 255);
+      } else if (u.type === gl!.FLOAT_VEC4 && Array.isArray(val)) {
+        gl!.uniform4f(u.location, val[0], val[1], val[2], val[3]);
       }
     }
 
