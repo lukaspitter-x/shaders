@@ -144,6 +144,7 @@ export function parseShader(source: string): ParsedShader {
 
     const label = values.label ?? name;
     const hint = description || undefined;
+    const section = values.section;
     const u: ParsedUniform = { name, glslType, role, label, hint };
 
     const isColor = flags.has('color') || (glslType === 'vec3' && !!values.default?.startsWith('#'));
@@ -180,6 +181,11 @@ export function parseShader(source: string): ParsedShader {
       images.push(name);
     }
     // (Unsupported user types fall through with no control — added as needed.)
+
+    if (section && schema.length > 0) {
+      const last = schema[schema.length - 1];
+      if (last.key === name) last.section = section;
+    }
 
     if (u.default !== undefined) defaults[name] = u.default;
     uniforms.push(u);
