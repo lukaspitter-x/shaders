@@ -1,0 +1,170 @@
+/**
+ * Parse Pencil's annotated GLSL into a settings schema + uniform manifest.
+ *
+ * Pencil drives its control panel from JSDoc-style annotations on `uniform`
+ * declarations. The annotated `.glsl` file is therefore BOTH the shader and the
+ * schema — we parse it here so the workbench panel matches Pencil's exactly.
+ *
+ *   /** @resolution *\/            → system uniform: canvas size (vec2)
+ *   /** @time *\/                  → system uniform: elapsed seconds (float)
+ *   /** @sdf *\/                   → system uniform: host shape SDF (sampler2D)
+ *   /** @label .. @default .. @range a, b *\/  float  → slider control
+ *   /** @label .. @color @default #rrggbb *\/  vec3   → color control
+ *
+ * Pure module (no DOM / WebGL) so it can be unit-tested in isolation.
+ */
+import type { SettingsSchema } from '@/settings/schema';
+import { normalizeHex } from '@/lib/hex';
+
+export type UniformRole = 'resolution' | 'time' | 'sdf' | 'user';
+
+export interface ParsedUniform {
+  name: string;
+  glslType: string;
+  role: UniformRole;
+  control?: 'slider' | 'number' | 'color';
+  label?: string;
+  hint?: string;
+  default?: number | string;
+  min?: number;
+  max?: number;
+}
+
+/** Setting values are keyed by uniform name: number for floats, hex for colors. */
+export type ShaderValues = Record<string, number | string>;
+
+export interface ParsedShader {
+  uniforms: ParsedUniform[];
+  schema: SettingsSchema<ShaderValues>;
+  defaults: ShaderValues;
+  /** role → uniform name, so the renderer knows which uniform to feed. */
+  system: { resolution?: string; time?: string; sdf?: string };
+}
+
+/** Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`. */
+const UNIFORM_RE = /\/\*\*([\s\S]*?)\*\/\s*uniform\s+(\w+)\s+(\w+)\s*;/g;
+
+/** Strip the per-line `*` gutter from a doc-comment body. */
+function cleanBody(body: string): string {
+  return body
+    .split('\n')
+    .map((l) => l.replace(/^\s*\*?\s?/, '').replace(/\s+$/, ''))
+    .join('\n')
+    .trim();
+}
+
+interface Tags {
+  description: string;
+  flags: Set<string>;
+  values: Record<string, string>;
+}
+
+/** Split a doc body into leading prose + `@tag value` pairs (`@flag` → flag). */
+function parseTags(body: string): Tags {
+  const text = cleanBody(body);
+  const firstAt = text.search(/@\w/);
+  const description = (firstAt === -1 ? text : text.slice(0, firstAt)).trim();
+  const flags = new Set<string>();
+  const values: Record<string, string> = {};
+  const re = /@(\w+)([^@]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const tag = m[1];
+    const val = m[2].trim();
+    if (val) values[tag] = val;
+    else flags.add(tag);
+  }
+  return { description, flags, values };
+}
+
+/** A "nice" slider step (~200 divisions snapped to a 1/2/5 decade). */
+function niceStep(min: number, max: number): number {
+  const span = Math.abs(max - min);
+  if (!span || !Number.isFinite(span)) return 0.01;
+  const raw = span / 200;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const nice = norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10;
+  return nice * mag;
+}
+
+/**
+ * Sanitize values against the schema on read (non-destructive). Clamps numeric
+ * controls to their range so an out-of-range stored/stale value can never reach
+ * the shader. Colors pass through — the renderer's hex→rgb already tolerates bad
+ * input, and clamping a half-typed hex would fight the color field. Per the kit:
+ * the schema doubles as the validator, applied read-side.
+ */
+export function sanitizeValues(
+  schema: SettingsSchema<ShaderValues>,
+  values: ShaderValues,
+): ShaderValues {
+  const out: ShaderValues = { ...values };
+  for (const c of schema) {
+    if (c.kind !== 'slider' && c.kind !== 'number') continue;
+    const n = typeof out[c.key] === 'number' ? (out[c.key] as number) : Number(out[c.key]);
+    if (!Number.isFinite(n)) continue;
+    let clamped = n;
+    if (c.kind === 'slider') clamped = Math.min(c.max, Math.max(c.min, n));
+    else {
+      if (c.min !== undefined) clamped = Math.max(c.min, clamped);
+      if (c.max !== undefined) clamped = Math.min(c.max, clamped);
+    }
+    out[c.key] = clamped;
+  }
+  return out;
+}
+
+export function parseShader(source: string): ParsedShader {
+  const uniforms: ParsedUniform[] = [];
+  const schema: SettingsSchema<ShaderValues> = [];
+  const defaults: ShaderValues = {};
+  const system: ParsedShader['system'] = {};
+
+  UNIFORM_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = UNIFORM_RE.exec(source))) {
+    const [, body, glslType, name] = m;
+    const { description, flags, values } = parseTags(body);
+
+    let role: UniformRole = 'user';
+    if (flags.has('resolution')) role = 'resolution';
+    else if (flags.has('time')) role = 'time';
+    else if (flags.has('sdf')) role = 'sdf';
+
+    if (role !== 'user') {
+      system[role] = name;
+      uniforms.push({ name, glslType, role });
+      continue;
+    }
+
+    const label = values.label ?? name;
+    const hint = description || undefined;
+    const u: ParsedUniform = { name, glslType, role, label, hint };
+
+    const isColor = flags.has('color') || (glslType === 'vec3' && !!values.default?.startsWith('#'));
+    if (isColor) {
+      u.control = 'color';
+      u.default = normalizeHex(values.default ?? '') ?? '#000000';
+      schema.push({ key: name, label, hint, kind: 'color' });
+    } else if (glslType === 'float') {
+      u.default = values.default !== undefined ? Number(values.default) : 0;
+      if (values.range) {
+        const [min, max] = values.range.split(',').map((s) => Number(s.trim()));
+        u.control = 'slider';
+        u.min = min;
+        u.max = max;
+        schema.push({ key: name, label, hint, kind: 'slider', min, max, step: niceStep(min, max) });
+      } else {
+        u.control = 'number';
+        schema.push({ key: name, label, hint, kind: 'number' });
+      }
+    }
+    // (Unsupported user types fall through with no control — added as needed.)
+
+    if (u.default !== undefined) defaults[name] = u.default;
+    uniforms.push(u);
+  }
+
+  return { uniforms, schema, defaults, system };
+}
