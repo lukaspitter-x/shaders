@@ -23,13 +23,22 @@ uniform float u_cols;
 uniform float u_rows;
 
 /**
- * Dot size relative to cell. 0 = invisible, 1 = fills cell.
+ * Smallest dot size (at animation start/end), relative to cell.
  * @section Grid
- * @label Dot Size
- * @default 0.7
+ * @label Min Size
+ * @default 0.0
+ * @range 0, 1
+ */
+uniform float u_dotMin;
+
+/**
+ * Largest dot size (at animation peak), relative to cell.
+ * @section Grid
+ * @label Max Size
+ * @default 0.8
  * @range 0.1, 1
  */
-uniform float u_dotSize;
+uniform float u_dotMax;
 
 /**
  * Where the stagger ripple originates.
@@ -261,7 +270,7 @@ void main() {
              * (1.0 - easeByType(disappear, u_dotEaseType, u_dotBezier));
 
   // dot
-  float radius = u_dotSize * 0.5 * anim;
+  float radius = mix(u_dotMin, u_dotMax, anim) * 0.5;
   vec2 cellCenter = cellUV - 0.5;
   float cellAspect = (u_resolution.x / grid.x) / (u_resolution.y / grid.y);
   cellCenter.x *= cellAspect;
