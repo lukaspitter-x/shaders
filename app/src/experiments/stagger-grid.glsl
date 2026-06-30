@@ -68,7 +68,7 @@ uniform float u_direction;
 
 /**
  * @label Easing
- * @select Bezier, Spring
+ * @select Bezier, Spring, Bounce, Elastic
  * @default 0
  */
 uniform float u_easingType;
@@ -134,11 +134,42 @@ float springEase(float t) {
   return 1.0 - exp(-d * t) * cos(w * t);
 }
 
+float bounceEase(float t) {
+  float n = 7.5625;
+  float d = 2.75;
+  float it = 1.0 - t;
+  float b;
+  if (it < 1.0 / d) {
+    b = n * it * it;
+  } else if (it < 2.0 / d) {
+    float p = it - 1.5 / d;
+    b = n * p * p + 0.75;
+  } else if (it < 2.5 / d) {
+    float p = it - 2.25 / d;
+    b = n * p * p + 0.9375;
+  } else {
+    float p = it - 2.625 / d;
+    b = n * p * p + 0.984375;
+  }
+  return 1.0 - b;
+}
+
+float elasticEase(float t) {
+  if (t <= 0.0) return 0.0;
+  if (t >= 1.0) return 1.0;
+  float p = u_springDamp * 0.1;
+  float amp = 1.0;
+  float s = p * 0.25;
+  return amp * pow(2.0, -10.0 * t) * sin((t - s) * 6.2832 / p) + 1.0;
+}
+
 float applyEasing(float t) {
   t = clamp(t, 0.0, 1.0);
   float mode = floor(u_easingType + 0.5);
   if (mode < 0.5) return cubicBezier(t);
-  return clamp(springEase(t), 0.0, 1.5);
+  if (mode < 1.5) return clamp(springEase(t), 0.0, 1.5);
+  if (mode < 2.5) return bounceEase(t);
+  return clamp(elasticEase(t), -0.5, 1.5);
 }
 
 float computeStagger(vec2 cellID, vec2 grid) {
