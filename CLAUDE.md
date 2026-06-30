@@ -64,6 +64,12 @@ docs/            # plan.md, decisions.md
 - `npm run test` — vitest; test the pure cores (the GLSL parser, SDF math)
 - `npm run build` — before declaring done
 
+## Workflow
+
+- **Auto-commit after each major change** — once a feature or fix is verified
+  (typecheck + tests + build pass), commit immediately rather than batching.
+  Don't wait for the user to ask.
+
 ## Deviations from the kit (reconciled)
 
 - **No Three.js / R3F / Pixi.** The artifact is flat Pencil fragment shaders;

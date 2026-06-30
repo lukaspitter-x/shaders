@@ -120,6 +120,7 @@ export function ShaderViewport({
     const res = r.setShader(parsed, fragSource);
     setError(res.ok ? null : res.error);
     timeRef.current = 0;
+    loadedImagesRef.current = {};
     regenerateSdf();
     drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,6 +132,30 @@ export function ShaderViewport({
     drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape]);
+
+  // Load user images into GL textures when their blob URLs change.
+  const loadedImagesRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const r = rendererRef.current;
+    if (!r) return;
+    for (const name of parsed.images) {
+      const url = values[name];
+      if (typeof url !== 'string' || url === loadedImagesRef.current[name]) continue;
+      loadedImagesRef.current[name] = url;
+      if (!url) {
+        r.setImage(name, null);
+        drawFrame();
+        continue;
+      }
+      const img = new Image();
+      img.onload = () => {
+        r.setImage(name, img);
+        drawFrame();
+      };
+      img.src = url;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values, parsed]);
 
   // Redraw on settings edits while paused (the loop covers the running case).
   useEffect(() => {

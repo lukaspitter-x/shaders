@@ -25,6 +25,8 @@ export interface ShaderRenderer {
   setShader(parsed: ParsedShader, fragSource: string): SetShaderResult;
   /** Upload the host-shape SDF for `@sdf` fills (R channel = px distance). */
   setSdf(data: Float32Array | null, width: number, height: number): void;
+  /** Upload a user image for a `sampler2D` uniform (Y-flipped for Pencil compat). */
+  setImage(uniformName: string, source: TexImageSource | null): void;
   draw(values: ShaderValues, timeSeconds: number, mouse: [number, number], width: number, height: number): void;
   dispose(): void;
 }
@@ -50,6 +52,12 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
   let sdfTexture: WebGLTexture | null = null;
   let hasSdf = false;
 
+  // User image textures (sampler2D with @label). Keyed by uniform name.
+  // SDF occupies texture unit 0; images start at unit 1.
+  const imageTextures = new Map<string, WebGLTexture>();
+  let imageUnitMap = new Map<string, number>();
+  let imageNames: string[] = [];
+
   function setSdf(data: Float32Array | null, width: number, height: number): void {
     if (!sdfTexture) sdfTexture = gl!.createTexture();
     gl!.bindTexture(gl!.TEXTURE_2D, sdfTexture);
@@ -62,6 +70,25 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.R16F, 1, 1, 0, gl!.RED, gl!.FLOAT, new Float32Array([0]));
       hasSdf = false;
     }
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+  }
+
+  function setImage(uniformName: string, source: TexImageSource | null): void {
+    if (!source) {
+      const tex = imageTextures.get(uniformName);
+      if (tex) { gl!.deleteTexture(tex); imageTextures.delete(uniformName); }
+      return;
+    }
+    let tex = imageTextures.get(uniformName);
+    if (!tex) { tex = gl!.createTexture()!; imageTextures.set(uniformName, tex); }
+    gl!.bindTexture(gl!.TEXTURE_2D, tex);
+    // Y-flip: Pencil image samplers are flipped relative to gl_FragCoord.
+    gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, 1);
+    gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gl!.RGBA, gl!.UNSIGNED_BYTE, source);
+    gl!.pixelStorei(gl!.UNPACK_FLIP_Y_WEBGL, 0);
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
@@ -104,6 +131,12 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     if (program) gl!.deleteProgram(program);
     program = prog;
     system = parsed.system;
+    imageNames = parsed.images;
+    imageUnitMap = new Map(imageNames.map((name, i) => [name, i + 1]));
+    // Clean up textures for images no longer in the new shader.
+    for (const [name, tex] of imageTextures) {
+      if (!imageUnitMap.has(name)) { gl!.deleteTexture(tex); imageTextures.delete(name); }
+    }
     uniforms = [];
     const count = gl!.getProgramParameter(prog, gl!.ACTIVE_UNIFORMS) as number;
     for (let i = 0; i < count; i++) {
@@ -138,6 +171,15 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       gl!.bindTexture(gl!.TEXTURE_2D, sdfTexture);
     }
 
+    // Bind user image textures to their assigned units (1+).
+    for (const [name, unit] of imageUnitMap) {
+      const tex = imageTextures.get(name);
+      if (tex) {
+        gl!.activeTexture(gl!.TEXTURE0 + unit);
+        gl!.bindTexture(gl!.TEXTURE_2D, tex);
+      }
+    }
+
     for (const u of uniforms) {
       if (!u.location) continue;
       switch (u.name) {
@@ -163,6 +205,13 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
           continue;
       }
 
+      // User image sampler — bind its texture unit.
+      const imgUnit = imageUnitMap.get(u.name);
+      if (imgUnit !== undefined) {
+        gl!.uniform1i(u.location, imgUnit);
+        continue;
+      }
+
       const val = values[u.name];
       if (val === undefined) continue;
       if (u.type === gl!.FLOAT) {
@@ -180,10 +229,12 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     if (program) gl!.deleteProgram(program);
     if (vao) gl!.deleteVertexArray(vao);
     if (sdfTexture) gl!.deleteTexture(sdfTexture);
+    for (const tex of imageTextures.values()) gl!.deleteTexture(tex);
+    imageTextures.clear();
     program = null;
     uniforms = [];
     sdfTexture = null;
   }
 
-  return { setShader, setSdf, draw, dispose };
+  return { setShader, setSdf, setImage, draw, dispose };
 }

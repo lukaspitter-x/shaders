@@ -47,6 +47,7 @@ export type Control<S, K extends keyof S = keyof S> = K extends keyof S
           step?: number;
           unit?: string;
         })
+      | (ControlBase<S, K> & { kind: 'image' })
   : never;
 
 export type SettingsSchema<S> = Control<S>[];

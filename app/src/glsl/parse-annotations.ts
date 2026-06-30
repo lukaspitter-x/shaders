@@ -22,7 +22,7 @@ export interface ParsedUniform {
   name: string;
   glslType: string;
   role: UniformRole;
-  control?: 'slider' | 'number' | 'color';
+  control?: 'slider' | 'number' | 'color' | 'image';
   label?: string;
   hint?: string;
   default?: number | string;
@@ -39,6 +39,8 @@ export interface ParsedShader {
   defaults: ShaderValues;
   /** role → uniform name, so the renderer knows which uniform to feed. */
   system: { resolution?: string; time?: string; mouse?: string; sdf?: string };
+  /** User image sampler uniform names (sampler2D with @label, not @sdf). */
+  images: string[];
 }
 
 /** Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`. */
@@ -120,6 +122,7 @@ export function parseShader(source: string): ParsedShader {
   const schema: SettingsSchema<ShaderValues> = [];
   const defaults: ShaderValues = {};
   const system: ParsedShader['system'] = {};
+  const images: string[] = [];
 
   UNIFORM_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -160,6 +163,11 @@ export function parseShader(source: string): ParsedShader {
         u.control = 'number';
         schema.push({ key: name, label, hint, kind: 'number' });
       }
+    } else if (glslType === 'sampler2D') {
+      u.control = 'image';
+      u.default = '';
+      schema.push({ key: name, label, hint, kind: 'image' });
+      images.push(name);
     }
     // (Unsupported user types fall through with no control — added as needed.)
 
@@ -167,5 +175,5 @@ export function parseShader(source: string): ParsedShader {
     uniforms.push(u);
   }
 
-  return { uniforms, schema, defaults, system };
+  return { uniforms, schema, defaults, system, images };
 }

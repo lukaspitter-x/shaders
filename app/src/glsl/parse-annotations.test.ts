@@ -24,6 +24,9 @@ uniform vec3 u_colorA;
 
 /** @sdf */
 uniform sampler2D u_shape;
+
+/** @label Background */
+uniform sampler2D u_image;
 `;
 
 describe('parseShader', () => {
@@ -40,7 +43,14 @@ describe('parseShader', () => {
 
   it('keeps system uniforms out of the control schema', () => {
     const keys = parsed.schema.map((c) => c.key);
-    expect(keys).toEqual(['u_speed', 'u_colorA']);
+    expect(keys).toEqual(['u_speed', 'u_colorA', 'u_image']);
+  });
+
+  it('turns a labelled sampler2D into an image control', () => {
+    const img = parsed.schema.find((c) => c.key === 'u_image');
+    expect(img).toMatchObject({ kind: 'image', label: 'Background' });
+    expect(parsed.defaults.u_image).toBe('');
+    expect(parsed.images).toEqual(['u_image']);
   });
 
   it('turns a ranged float into a slider with label, hint, and bounds', () => {

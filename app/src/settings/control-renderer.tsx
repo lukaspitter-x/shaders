@@ -7,6 +7,7 @@ import { SwitchControl } from './controls/switch-control';
 import { SelectControl } from './controls/select-control';
 import { ColorControl } from './controls/color-control';
 import { Vec3Control, type Vec3 } from './controls/vec3-control';
+import { ImageControl } from './controls/image-control';
 
 /** Render a single declarative control against the current settings object. */
 function ControlRendererImpl<S>({
@@ -106,6 +107,16 @@ function ControlRendererImpl<S>({
           max={control.max}
           step={control.step}
           unit={control.unit}
+          onChange={set}
+          onReset={onReset}
+        />
+      );
+    case 'image':
+      return (
+        <ImageControl
+          label={control.label}
+          hint={control.hint}
+          value={v as string}
           onChange={set}
           onReset={onReset}
         />
