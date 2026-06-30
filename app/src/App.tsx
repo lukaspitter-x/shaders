@@ -28,7 +28,19 @@ import {
   undo as histUndo,
   type History,
 } from '@/lib/history';
+import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
 import { EXPERIMENTS } from '@/experiments/registry';
+
+// Per-browser persistence keys. Settings values and the host-shape pick are
+// keyed per shader so each shader keeps its own edits across reloads.
+const valuesKey = (id: string) => `values:${id}`;
+const shapeKey = (id: string) => `shape:${id}`;
+const SELECTED_KEY = 'selected';
+
+/** A stored shape id is usable only if it's "none" or a built-in (custom uploads
+ *  are in-memory, so they don't survive a restart). */
+const isUsableShapeId = (id: string | null): id is string =>
+  id === 'none' || BUILTIN_SHAPES.some((s) => s.id === id);
 
 /**
  * App shell — top bar + viewport + right settings column (no timeline). Layout
@@ -40,10 +52,18 @@ import { EXPERIMENTS } from '@/experiments/registry';
  * shader and the schema both.
  */
 export default function App() {
-  const [selectedId, setSelectedId] = useState(EXPERIMENTS[0]?.id);
-  const [running, setRunning] = useState(true);
-  const [fpsVisible, setFpsVisible] = useState(true);
-  const [fpsLogging, setFpsLogging] = useState(false);
+  // Remember the last-open shader across reloads (falling back if it's gone).
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => {
+    const saved = readJson<string | null>(SELECTED_KEY, null);
+    return saved && EXPERIMENTS.some((e) => e.id === saved) ? saved : EXPERIMENTS[0]?.id;
+  });
+  useEffect(() => {
+    if (selectedId) writeJson(SELECTED_KEY, selectedId);
+  }, [selectedId]);
+
+  const [running, setRunning] = useLocalStorage('running', true);
+  const [fpsVisible, setFpsVisible] = useLocalStorage('fpsVisible', true);
+  const [fpsLogging, setFpsLogging] = useLocalStorage('fpsLogging', false);
 
   // Host shape: built-ins + user uploads (in-memory only — no persistence yet).
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
@@ -67,18 +87,44 @@ export default function App() {
   // Settings values + undo history reset when the shader changes; the shape
   // default follows the shader type — a real shape for `@sdf` (shape-aware)
   // shaders, None (full background) for generative ones.
-  const [values, setValues] = useState<ShaderValues>(() => parsed?.defaults ?? {});
+  const [values, setValues] = useState<ShaderValues>(() => {
+    const id = EXPERIMENTS.find((e) => e.id === selectedId)?.id;
+    return (id ? readJson<ShaderValues | null>(valuesKey(id), null) : null) ?? parsed?.defaults ?? {};
+  });
   const [history, setHistory] = useState<History<ShaderValues>>(() => emptyHistory());
+  // On a shader switch, restore that shader's persisted settings + shape (or its
+  // defaults). Values are validated against the live schema on read by
+  // `effectiveValues`/`sanitizeValues` below — stale stored data can't render wrong.
   useEffect(() => {
-    setValues(parsed?.defaults ?? {});
+    if (!parsed || !selected) {
+      setValues({});
+      setHistory(emptyHistory());
+      setShapeId('none');
+      return;
+    }
+    const storedValues = readJson<ShaderValues | null>(valuesKey(selected.id), null);
+    setValues(storedValues ?? parsed.defaults);
     setHistory(emptyHistory());
-    setShapeId(parsed?.system.sdf ? 'rounded-rect' : 'none');
-  }, [parsed]);
+    const storedShape = readJson<string | null>(shapeKey(selected.id), null);
+    setShapeId(
+      isUsableShapeId(storedShape)
+        ? storedShape
+        : parsed.system.sdf
+          ? 'rounded-rect'
+          : 'none',
+    );
+  }, [parsed, selected]);
+
+  // Pick a host shape and persist it for the current shader.
+  const selectShape = (id: string) => {
+    setShapeId(id);
+    if (selectedId) writeJson(shapeKey(selectedId), id);
+  };
 
   // Safety: a shape-aware shader must never be left on "None" (empty SDF → black) —
   // coerce to a real host if it ever is (e.g. stale state from before this guard).
   useEffect(() => {
-    if (requiresShape && shapeId === 'none') setShapeId('rounded-rect');
+    if (requiresShape && shapeId === 'none') selectShape('rounded-rect');
   }, [requiresShape, shapeId]);
 
   const onUploadShape = async (file: File) => {
@@ -87,6 +133,7 @@ export default function App() {
       const id = `custom-${Date.now()}`;
       const label = file.name.replace(/\.[^.]+$/, '') || 'Custom';
       setCustomShapes((prev) => [...prev, makeCustomShape(sdf, id, label)]);
+      // Uploads are in-memory only; persisting the id would dangle after reload.
       setShapeId(id);
     } catch (err) {
       console.error('[shape upload]', err);
@@ -97,7 +144,9 @@ export default function App() {
   // one undo step), then apply the edit.
   const onChange = (key: string, value: ShaderValues[string]) => {
     setHistory((h) => record(h, values, key, performance.now()));
-    setValues((prev) => ({ ...prev, [key]: value }));
+    const next = { ...values, [key]: value };
+    setValues(next);
+    if (selectedId) writeJson(valuesKey(selectedId), next);
   };
 
   const doUndo = () => {
@@ -105,23 +154,41 @@ export default function App() {
     if (!r) return;
     setHistory(r.history);
     setValues(r.restore);
+    if (selectedId) writeJson(valuesKey(selectedId), r.restore);
   };
   const doRedo = () => {
     const r = histRedo(history, values);
     if (!r) return;
     setHistory(r.history);
     setValues(r.restore);
+    if (selectedId) writeJson(valuesKey(selectedId), r.restore);
   };
 
-  // ⌘Z / ⌘⇧Z (and Ctrl on non-mac), except while editing a text field.
+  // Keyboard shortcuts. Both skip text fields so typing isn't hijacked:
+  //   ⌘Z / ⌘⇧Z (Ctrl on non-mac) — undo / redo
+  //   Space — toggle play/pause
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      e.preventDefault();
-      if (e.shiftKey) doRedo();
-      else doUndo();
+      const typing =
+        !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        if (typing) return;
+        e.preventDefault();
+        if (e.shiftKey) doRedo();
+        else doUndo();
+        return;
+      }
+
+      if (e.key === ' ' || e.code === 'Space') {
+        if (typing) return;
+        // A focused button/select handles Space natively (it activates the
+        // control) — don't also toggle, or the two cancel out or double-fire.
+        if (t && (t.tagName === 'BUTTON' || t.getAttribute('role') === 'button')) return;
+        e.preventDefault();
+        setRunning((r) => !r);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -186,7 +253,7 @@ export default function App() {
               <ShapePicker
                 shapes={shapes}
                 value={shapeId}
-                onSelect={setShapeId}
+                onSelect={selectShape}
                 onUpload={onUploadShape}
                 requiresShape={requiresShape}
               />
@@ -208,7 +275,7 @@ export default function App() {
               variant="ghost"
               size="icon"
               aria-label={running ? 'Pause' : 'Play'}
-              title={running ? 'Pause' : 'Play'}
+              title={running ? 'Pause (Space)' : 'Play (Space)'}
               onClick={() => setRunning((r) => !r)}
             >
               {running ? <Pause /> : <Play />}
