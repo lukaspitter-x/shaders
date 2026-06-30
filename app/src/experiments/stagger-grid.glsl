@@ -53,31 +53,9 @@ uniform float u_speed;
 uniform float u_jitter;
 
 /**
- * @label Easing
- * @select Power, Cubic Bezier
- * @default 0
- */
-uniform float u_easeMode;
-
-/**
- * Power exponent. 1 = linear, 2 = quad, 3 = cubic.
- * @label Power
- * @default 2.0
- * @range 1, 5
- */
-uniform float u_easePower;
-
-/**
- * @label Direction
- * @select In, Out, In-Out
- * @default 1
- */
-uniform float u_easeDir;
-
-/**
  * @label Easing Curve
  * @bezier
- * @default 0.42, 0.0, 0.58, 1.0
+ * @default 0.0, 0.0, 0.58, 1.0
  */
 uniform vec4 u_bezier;
 
@@ -99,17 +77,10 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float powerEase(float t, float p, float dir) {
-  float d = floor(dir + 0.5);
-  if (d < 0.5) return pow(t, p);
-  if (d < 1.5) return 1.0 - pow(1.0 - t, p);
-  return t < 0.5
-    ? pow(t * 2.0, p) * 0.5
-    : 1.0 - pow((1.0 - t) * 2.0, p) * 0.5;
-}
-
-float cubicBezier(float t, float x1, float y1, float x2, float y2) {
+float applyEasing(float t) {
+  t = clamp(t, 0.0, 1.0);
   float s = t;
+  float x1 = u_bezier.x, y1 = u_bezier.y, x2 = u_bezier.z, y2 = u_bezier.w;
   for (int i = 0; i < 8; i++) {
     float inv = 1.0 - s;
     float xS = 3.0 * inv * inv * s * x1 + 3.0 * inv * s * s * x2 + s * s * s;
@@ -119,13 +90,6 @@ float cubicBezier(float t, float x1, float y1, float x2, float y2) {
   }
   float inv = 1.0 - s;
   return 3.0 * inv * inv * s * y1 + 3.0 * inv * s * s * y2 + s * s * s;
-}
-
-float applyEasing(float t) {
-  t = clamp(t, 0.0, 1.0);
-  float mode = floor(u_easeMode + 0.5);
-  if (mode < 0.5) return powerEase(t, u_easePower, u_easeDir);
-  return cubicBezier(t, u_bezier.x, u_bezier.y, u_bezier.z, u_bezier.w);
 }
 
 void main() {
