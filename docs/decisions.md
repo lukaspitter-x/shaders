@@ -233,6 +233,16 @@ undo history is in-memory only.
   boundary). Fix: pass `{...defaults, ...values}` so a missing key backfills, and
   `normalizeHex` now rejects non-strings. (Also logged cross-project in
   `engineer-agent.md`.) Consider adding an error boundary around the viewport.
+- **"None" host blanks a shape-aware (`@sdf`) shader.** Selecting Shape = None on
+  a shader that uses `@sdf` (e.g. `soft-shape`) feeds an empty SDF, so its
+  `if (depth <= 0.0) return;` paints black — looks broken, is actually faithful (a
+  plain Pencil rectangle's SDF is empty too). Deliberately NOT fixed by faking a
+  full-canvas SDF for None (that would render in the preview but black in Pencil —
+  the D8 permissiveness trap). Fix: `ShapePicker` hides "None" for `@sdf` shaders
+  (`requiresShape` prop), `App` defaults/coerces them to a real host (`rounded-rect`)
+  and never resolves one to a null shape. "None" stays only for generative shaders.
+  For a faithful full-canvas preview there's now a **"Full frame"** builtin host
+  (a real positive-inside rect SDF, `0.5 - |py|`) — use that instead of "None".
 
 ## Still unconfirmed (resolve by minting examples)
 

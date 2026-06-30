@@ -21,20 +21,25 @@ function ShapeThumb({ shape, size }: { shape: ShapeDef | null; size: number }) {
 }
 
 /**
- * Host-shape picker: a popover of shape thumbnails (built-ins + uploads) plus a
- * "None / full background" tile and an upload tile. `value` is a shape id, or
- * `'none'`. Uploads call `onUpload(file)` — the parent derives the SDF.
+ * Host-shape picker: a popover of shape thumbnails (built-ins + uploads) plus an
+ * upload tile, and — for generative shaders only — a "None / full background"
+ * tile. `value` is a shape id, or `'none'`. Uploads call `onUpload(file)`.
+ *
+ * `requiresShape` (set for `@sdf` / shape-aware shaders) hides "None": a
+ * shape-aware fill always has a host, and an empty SDF would just render black.
  */
 export function ShapePicker({
   shapes,
   value,
   onSelect,
   onUpload,
+  requiresShape = false,
 }: {
   shapes: ShapeDef[];
   value: string;
   onSelect: (id: string) => void;
   onUpload: (file: File) => void;
+  requiresShape?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -43,7 +48,7 @@ export function ShapePicker({
   const currentLabel = value === 'none' ? 'None' : (current?.label ?? 'None');
 
   const tiles: { id: string; label: string; def: ShapeDef | null }[] = [
-    { id: 'none', label: 'None', def: null },
+    ...(requiresShape ? [] : [{ id: 'none', label: 'None', def: null }]),
     ...shapes.map((s) => ({ id: s.id, label: s.label, def: s })),
   ];
 

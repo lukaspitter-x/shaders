@@ -11,7 +11,7 @@
  *
  * Pure module (math only) so it's cheap to regenerate and unit-testable.
  */
-export type BuiltinShapeId = 'rounded-rect' | 'circle' | 'blob';
+export type BuiltinShapeId = 'rounded-rect' | 'circle' | 'blob' | 'full-frame';
 
 export interface ShapeDef {
   id: string;
@@ -39,6 +39,11 @@ function smin(a: number, b: number, k: number): number {
  */
 function builtinDistance(id: BuiltinShapeId, px: number, py: number): number {
   switch (id) {
+    // The whole canvas is the host (a real positive-inside rect SDF, not "None"):
+    // distance to the top/bottom edges, positive across the full frame at any
+    // aspect (sample() has no aspect, so the known vertical span ±0.5 drives it).
+    case 'full-frame':
+      return 0.5 - Math.abs(py);
     case 'circle':
       return 0.38 - Math.hypot(px, py);
     case 'rounded-rect':
@@ -57,6 +62,7 @@ export const BUILTIN_SHAPES: ShapeDef[] = (
     ['rounded-rect', 'Rounded rect'],
     ['circle', 'Circle'],
     ['blob', 'Blob'],
+    ['full-frame', 'Full frame'],
   ] as [BuiltinShapeId, string][]
 ).map(([id, label]) => ({
   id,

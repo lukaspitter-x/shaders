@@ -47,11 +47,19 @@ export default function App() {
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
   const [shapeId, setShapeId] = useState('none');
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
-  const selectedShape: ShapeDef | null =
-    shapeId === 'none' ? null : (shapes.find((s) => s.id === shapeId) ?? null);
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
+  // Shape-aware (`@sdf`) shaders need a host shape — "None" feeds an empty SDF, so
+  // the shader renders nothing (faithful to a Pencil rectangle, but a dead end here).
+  const requiresShape = !!parsed?.system.sdf;
+
+  const selectedShape: ShapeDef | null =
+    shapeId !== 'none'
+      ? (shapes.find((s) => s.id === shapeId) ?? null)
+      : requiresShape
+        ? (shapes.find((s) => s.id === 'rounded-rect') ?? shapes[0] ?? null) // never hostless → black
+        : null;
 
   // Settings values + undo history reset when the shader changes; the shape
   // default follows the shader type — a real shape for `@sdf` (shape-aware)
@@ -63,6 +71,12 @@ export default function App() {
     setHistory(emptyHistory());
     setShapeId(parsed?.system.sdf ? 'rounded-rect' : 'none');
   }, [parsed]);
+
+  // Safety: a shape-aware shader must never be left on "None" (empty SDF → black) —
+  // coerce to a real host if it ever is (e.g. stale state from before this guard).
+  useEffect(() => {
+    if (requiresShape && shapeId === 'none') setShapeId('rounded-rect');
+  }, [requiresShape, shapeId]);
 
   const onUploadShape = async (file: File) => {
     try {
@@ -159,6 +173,7 @@ export default function App() {
                 value={shapeId}
                 onSelect={setShapeId}
                 onUpload={onUploadShape}
+                requiresShape={requiresShape}
               />
             </>
           )}
