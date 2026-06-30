@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ParsedShader, ShaderValues } from '@/glsl/parse-annotations';
+import type { LintFinding } from '@/glsl/lint-pencil';
 import { createShaderRenderer, type ShaderRenderer } from './webgl-quad';
 import { generateSdf, type ShapeDef } from './sdf-shapes';
 
@@ -20,6 +21,7 @@ export function ShaderViewport({
   values,
   running,
   shape,
+  lint,
 }: {
   parsed: ParsedShader;
   fragSource: string;
@@ -27,6 +29,7 @@ export function ShaderViewport({
   running: boolean;
   /** Host shape: feeds `u_shape` and clips the fill. `null` = full background. */
   shape: ShapeDef | null;
+  lint: LintFinding[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<ShaderRenderer | null>(null);
@@ -34,6 +37,7 @@ export function ShaderViewport({
   const shapeRef = useRef(shape);
   const sizeRef = useRef({ w: 1, h: 1 });
   const timeRef = useRef(0);
+  const mouseRef = useRef<[number, number]>([0, 0]);
   const [error, setError] = useState<string | null>(null);
 
   // Keep the loop's view of settings/shape current without re-running effects.
@@ -44,7 +48,7 @@ export function ShaderViewport({
   const drawFrame = () => {
     const r = rendererRef.current;
     const { w, h } = sizeRef.current;
-    if (r && w > 0 && h > 0) r.draw(valuesRef.current, timeRef.current, w, h);
+    if (r && w > 0 && h > 0) r.draw(valuesRef.current, timeRef.current, mouseRef.current, w, h);
   };
 
   // (Re)build the host-shape SDF at the current size and feed it to the renderer.
@@ -89,7 +93,19 @@ export function ShaderViewport({
     });
     ro.observe(canvas.parentElement ?? canvas);
 
+    // Track cursor in gl_FragCoord space (origin bottom-left, device pixels).
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      mouseRef.current = [
+        (e.clientX - rect.left) * dpr,
+        (rect.bottom - e.clientY) * dpr,
+      ];
+    };
+    canvas.addEventListener('pointermove', onPointerMove);
+
     return () => {
+      canvas.removeEventListener('pointermove', onPointerMove);
       ro.disconnect();
       r.dispose();
       rendererRef.current = null;
@@ -141,6 +157,9 @@ export function ShaderViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running]);
 
+  const lintErrors = lint.filter((f) => f.severity === 'error');
+  const lintWarnings = lint.filter((f) => f.severity === 'warning');
+
   return (
     <div className="relative h-full w-full">
       <canvas ref={canvasRef} className="block h-full w-full" />
@@ -149,6 +168,28 @@ export function ShaderViewport({
           <pre className="max-w-full overflow-auto whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-snug text-destructive">
             {error}
           </pre>
+        </div>
+      )}
+      {!error && lint.length > 0 && (
+        <div className="absolute bottom-0 left-0 right-0 max-h-[40%] overflow-auto bg-background/90 backdrop-blur-sm border-t border-border">
+          <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground border-b border-border">
+            Pencil compat — {lintErrors.length ? `${lintErrors.length} error${lintErrors.length > 1 ? 's' : ''}` : ''}{lintErrors.length && lintWarnings.length ? ', ' : ''}{lintWarnings.length ? `${lintWarnings.length} warning${lintWarnings.length > 1 ? 's' : ''}` : ''}
+          </div>
+          <ul className="py-1">
+            {lint.map((f, i) => (
+              <li key={i} className="flex gap-2 px-3 py-1">
+                <span className={`shrink-0 text-[10px] font-medium tabular-nums ${f.severity === 'error' ? 'text-destructive' : 'text-yellow-500'}`}>
+                  L{f.line}
+                </span>
+                <div className="min-w-0 text-[11px] leading-snug">
+                  <span className="text-foreground">{f.message}</span>
+                  {f.suggestion && (
+                    <span className="text-muted-foreground"> — {f.suggestion}</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

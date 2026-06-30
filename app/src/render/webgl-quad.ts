@@ -25,7 +25,7 @@ export interface ShaderRenderer {
   setShader(parsed: ParsedShader, fragSource: string): SetShaderResult;
   /** Upload the host-shape SDF for `@sdf` fills (R channel = px distance). */
   setSdf(data: Float32Array | null, width: number, height: number): void;
-  draw(values: ShaderValues, timeSeconds: number, width: number, height: number): void;
+  draw(values: ShaderValues, timeSeconds: number, mouse: [number, number], width: number, height: number): void;
   dispose(): void;
 }
 
@@ -118,7 +118,7 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     return { ok: true };
   }
 
-  function draw(values: ShaderValues, time: number, width: number, height: number): void {
+  function draw(values: ShaderValues, time: number, mouse: [number, number], width: number, height: number): void {
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
@@ -146,6 +146,9 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
           continue;
         case system.time:
           gl!.uniform1f(u.location, time);
+          continue;
+        case system.mouse:
+          gl!.uniform2f(u.location, mouse[0], mouse[1]);
           continue;
         case system.sdf:
         case '_pencilClip':

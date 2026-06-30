@@ -11,9 +11,11 @@ import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { UndoRedoButtons } from '@/components/undo-redo-buttons';
 import { ShapePicker } from '@/components/shape-picker';
+import { LintBadge } from '@/components/lint-badge';
 import { FpsPanel } from '@/perf/fps-panel';
 import { SettingsColumn } from '@/settings/settings-column';
 import { parseShader, sanitizeValues, type ShaderValues } from '@/glsl/parse-annotations';
+import { lintPencil } from '@/glsl/lint-pencil';
 import { ShaderViewport } from '@/render/shader-viewport';
 import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
 import { imageToSdf } from '@/render/image-sdf';
@@ -50,6 +52,7 @@ export default function App() {
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
+  const lint = useMemo(() => (selected ? lintPencil(selected.source) : []), [selected]);
   // Shape-aware (`@sdf`) shaders need a host shape — "None" feeds an empty SDF, so
   // the shader renders nothing (faithful to a Pencil rectangle, but a dead end here).
   const requiresShape = !!parsed?.system.sdf;
@@ -163,6 +166,7 @@ export default function App() {
           onUndo={doUndo}
           onRedo={doRedo}
         />
+        {selected && <LintBadge findings={lint} />}
 
         <div className="ml-auto flex items-center gap-2">
           {selected && (
@@ -203,6 +207,7 @@ export default function App() {
                   values={effectiveValues}
                   running={running}
                   shape={selectedShape}
+                  lint={lint}
                 />
               </ErrorBoundary>
             </div>

@@ -8,6 +8,9 @@ uniform vec2 u_resolution;
 /** @time */
 uniform float u_time;
 
+/** @mouse */
+uniform vec2 u_mouse;
+
 /**
  * Overall motion speed.
  * @label Speed
@@ -30,6 +33,7 @@ describe('parseShader', () => {
     expect(parsed.system).toEqual({
       resolution: 'u_resolution',
       time: 'u_time',
+      mouse: 'u_mouse',
       sdf: 'u_shape',
     });
   });

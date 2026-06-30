@@ -16,7 +16,7 @@
 import type { SettingsSchema } from '@/settings/schema';
 import { normalizeHex } from '@/lib/hex';
 
-export type UniformRole = 'resolution' | 'time' | 'sdf' | 'user';
+export type UniformRole = 'resolution' | 'time' | 'mouse' | 'sdf' | 'user';
 
 export interface ParsedUniform {
   name: string;
@@ -38,7 +38,7 @@ export interface ParsedShader {
   schema: SettingsSchema<ShaderValues>;
   defaults: ShaderValues;
   /** role → uniform name, so the renderer knows which uniform to feed. */
-  system: { resolution?: string; time?: string; sdf?: string };
+  system: { resolution?: string; time?: string; mouse?: string; sdf?: string };
 }
 
 /** Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`. */
@@ -130,6 +130,7 @@ export function parseShader(source: string): ParsedShader {
     let role: UniformRole = 'user';
     if (flags.has('resolution')) role = 'resolution';
     else if (flags.has('time')) role = 'time';
+    else if (flags.has('mouse')) role = 'mouse';
     else if (flags.has('sdf')) role = 'sdf';
 
     if (role !== 'user') {
