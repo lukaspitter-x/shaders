@@ -15,6 +15,7 @@ import flipPlasmaSource from './flip-plasma.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
 import mouseGlowSource from './mouse-glow.glsl?raw';
 import softShapeSource from './soft-shape.glsl?raw';
+import staggerGridSource from './stagger-grid.glsl?raw';
 
 export interface ShaderExperiment {
   id: string;
@@ -29,4 +30,5 @@ export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
   { id: 'mouse-glow', label: 'Mouse Glow', type: 'fill', source: mouseGlowSource },
   { id: 'soft-shape', label: 'Soft Shape', type: 'fill', source: softShapeSource },
+  { id: 'stagger-grid', label: 'Stagger Grid', type: 'fill', source: staggerGridSource },
 ];
