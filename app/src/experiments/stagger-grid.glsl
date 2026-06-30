@@ -53,11 +53,48 @@ uniform float u_speed;
 uniform float u_jitter;
 
 /**
+ * @label Origin
+ * @select Center, Corner, Left, Top, Right, Bottom
+ * @default 0
+ */
+uniform float u_from;
+
+/**
+ * @label Direction
+ * @select Normal, Alternate
+ * @default 0
+ */
+uniform float u_direction;
+
+/**
+ * @label Easing
+ * @select Bezier, Spring
+ * @default 0
+ */
+uniform float u_easingType;
+
+/**
  * @label Easing Curve
  * @bezier
  * @default 0.0, 0.0, 0.58, 1.0
  */
 uniform vec4 u_bezier;
+
+/**
+ * Spring stiffness — higher = faster oscillation.
+ * @label Stiffness
+ * @default 8.0
+ * @range 2, 20
+ */
+uniform float u_springStiff;
+
+/**
+ * Spring damping — lower = more bouncy overshoot.
+ * @label Damping
+ * @default 5.0
+ * @range 1, 15
+ */
+uniform float u_springDamp;
 
 /**
  * @label Color A
@@ -77,8 +114,7 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float applyEasing(float t) {
-  t = clamp(t, 0.0, 1.0);
+float cubicBezier(float t) {
   float s = t;
   float x1 = u_bezier.x, y1 = u_bezier.y, x2 = u_bezier.z, y2 = u_bezier.w;
   for (int i = 0; i < 8; i++) {
@@ -92,55 +128,98 @@ float applyEasing(float t) {
   return 3.0 * inv * inv * s * y1 + 3.0 * inv * s * s * y2 + s * s * s;
 }
 
+float springEase(float t) {
+  float w = u_springStiff;
+  float d = u_springDamp;
+  return 1.0 - exp(-d * t) * cos(w * t);
+}
+
+float applyEasing(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float mode = floor(u_easingType + 0.5);
+  if (mode < 0.5) return cubicBezier(t);
+  return clamp(springEase(t), 0.0, 1.5);
+}
+
+float computeStagger(vec2 cellID, vec2 grid) {
+  float from = floor(u_from + 0.5);
+  vec2 origin;
+  float maxDist;
+
+  if (from < 0.5) {
+    origin = (grid - 1.0) * 0.5;
+  } else if (from < 1.5) {
+    origin = vec2(0.0);
+  } else if (from < 2.5) {
+    origin = vec2(0.0, (grid.y - 1.0) * 0.5);
+    float dist = abs(cellID.x - origin.x);
+    return dist / max(grid.x - 1.0, 1.0);
+  } else if (from < 3.5) {
+    origin = vec2((grid.x - 1.0) * 0.5, 0.0);
+    float dist = abs(cellID.y - origin.y);
+    return dist / max(grid.y - 1.0, 1.0);
+  } else if (from < 4.5) {
+    origin = vec2(grid.x - 1.0, (grid.y - 1.0) * 0.5);
+    float dist = abs(cellID.x - origin.x);
+    return dist / max(grid.x - 1.0, 1.0);
+  } else {
+    origin = vec2((grid.x - 1.0) * 0.5, grid.y - 1.0);
+    float dist = abs(cellID.y - origin.y);
+    return dist / max(grid.y - 1.0, 1.0);
+  }
+
+  maxDist = length(origin);
+  float dist = length(cellID - origin);
+  return dist / max(maxDist, 0.001);
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
-  float aspect = u_resolution.x / u_resolution.y;
 
   vec2 grid = vec2(floor(u_cols), floor(u_rows));
   vec2 cellID = floor(uv * grid);
   vec2 cellUV = fract(uv * grid);
 
-  // stagger: distance from center → time offset
-  vec2 center = (grid - 1.0) * 0.5;
-  float maxDist = length(center);
-  float dist = length(cellID - center);
-  float staggerT = dist / max(maxDist, 0.001);
+  float staggerT = computeStagger(cellID, grid);
 
-  // add jitter: per-cell random offset
+  // jitter
   float jitterOffset = hash(cellID) * u_jitter;
   staggerT = clamp(staggerT + jitterOffset, 0.0, 1.0);
 
-  // apply user-selected easing to the stagger distribution
+  // ease the stagger distribution
   staggerT = applyEasing(staggerT);
 
-  // local time with stagger offset
+  // alternate: ping-pong the cycle
+  float isAlternate = floor(u_direction + 0.5);
   float cycleLen = 2.0 + u_stagger;
-  float localTime = mod(u_time * u_speed - staggerT * u_stagger, cycleLen);
+  float rawTime = u_time * u_speed - staggerT * u_stagger;
 
-  // per-dot animation: appear / disappear with same easing
+  float pingPongLen = cycleLen * 2.0;
+  float phase = mod(rawTime, mix(cycleLen, pingPongLen, isAlternate));
+  float localTime = mix(
+    mod(rawTime, cycleLen),
+    phase < cycleLen ? phase : pingPongLen - phase,
+    isAlternate
+  );
+
+  // per-dot animation
   float appear = clamp(localTime / 0.5, 0.0, 1.0);
   float disappear = clamp((localTime - (cycleLen - 0.5)) / 0.5, 0.0, 1.0);
   float anim = applyEasing(appear) * (1.0 - applyEasing(disappear));
 
-  // dot: circle in each cell, scaled by animation
+  // dot
   float radius = u_dotSize * 0.5 * anim;
   vec2 cellCenter = cellUV - 0.5;
-
-  // correct for non-square cells
   float cellAspect = (u_resolution.x / grid.x) / (u_resolution.y / grid.y);
   cellCenter.x *= cellAspect;
 
   float d = length(cellCenter);
   float dot = smoothstep(radius, radius - 0.02, d);
 
-  // color: blend A→B based on stagger distance
-  float colorT = staggerT;
-  vec3 col = mix(u_colorA, u_colorB, colorT);
-
-  // subtle brightness pulse per dot
+  // color
+  vec3 col = mix(u_colorA, u_colorB, staggerT);
   col *= 0.8 + 0.2 * anim;
 
-  // background
   vec3 bg = vec3(0.05);
   vec3 final = mix(bg, col, dot);
 
