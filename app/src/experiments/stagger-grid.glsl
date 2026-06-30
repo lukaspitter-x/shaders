@@ -53,6 +53,62 @@ uniform float u_speed;
 uniform float u_jitter;
 
 /**
+ * Easing mode: 0 = power, 1 = cubic bezier.
+ * @label Ease Mode
+ * @default 0.0
+ * @range 0, 1
+ */
+uniform float u_easeMode;
+
+/**
+ * Power exponent (power mode). 1 = linear, 2 = quad, 3 = cubic.
+ * @label Power
+ * @default 2.0
+ * @range 1, 5
+ */
+uniform float u_easePower;
+
+/**
+ * Direction (power mode): 0 = in, 1 = out, 2 = in-out.
+ * @label Direction
+ * @default 1.0
+ * @range 0, 2
+ */
+uniform float u_easeDir;
+
+/**
+ * Bezier control point 1 X (bezier mode).
+ * @label Bez X1
+ * @default 0.42
+ * @range 0, 1
+ */
+uniform float u_bezX1;
+
+/**
+ * Bezier control point 1 Y (bezier mode). Values outside 0–1 overshoot.
+ * @label Bez Y1
+ * @default 0.0
+ * @range -0.5, 1.5
+ */
+uniform float u_bezY1;
+
+/**
+ * Bezier control point 2 X (bezier mode).
+ * @label Bez X2
+ * @default 0.58
+ * @range 0, 1
+ */
+uniform float u_bezX2;
+
+/**
+ * Bezier control point 2 Y (bezier mode). Values outside 0–1 overshoot.
+ * @label Bez Y2
+ * @default 1.0
+ * @range -0.5, 1.5
+ */
+uniform float u_bezY2;
+
+/**
  * @label Color A
  * @color
  * @default #6c5ce7
@@ -70,13 +126,33 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float easeOutCubic(float t) {
-  float f = 1.0 - t;
-  return 1.0 - f * f * f;
+float powerEase(float t, float p, float dir) {
+  float d = floor(dir + 0.5);
+  if (d < 0.5) return pow(t, p);
+  if (d < 1.5) return 1.0 - pow(1.0 - t, p);
+  return t < 0.5
+    ? pow(t * 2.0, p) * 0.5
+    : 1.0 - pow((1.0 - t) * 2.0, p) * 0.5;
 }
 
-float easeInOutQuad(float t) {
-  return t < 0.5 ? 2.0 * t * t : 1.0 - 2.0 * (1.0 - t) * (1.0 - t);
+float cubicBezier(float t, float x1, float y1, float x2, float y2) {
+  float s = t;
+  for (int i = 0; i < 8; i++) {
+    float inv = 1.0 - s;
+    float xS = 3.0 * inv * inv * s * x1 + 3.0 * inv * s * s * x2 + s * s * s;
+    float dxS = 3.0 * inv * inv * x1 + 6.0 * inv * s * (x2 - x1) + 3.0 * s * s * (1.0 - x2);
+    s -= (xS - t) / max(dxS, 0.001);
+    s = clamp(s, 0.0, 1.0);
+  }
+  float inv = 1.0 - s;
+  return 3.0 * inv * inv * s * y1 + 3.0 * inv * s * s * y2 + s * s * s;
+}
+
+float applyEasing(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float mode = floor(u_easeMode + 0.5);
+  if (mode < 0.5) return powerEase(t, u_easePower, u_easeDir);
+  return cubicBezier(t, u_bezX1, u_bezY1, u_bezX2, u_bezY2);
 }
 
 void main() {
@@ -95,16 +171,19 @@ void main() {
 
   // add jitter: per-cell random offset
   float jitterOffset = hash(cellID) * u_jitter;
-  staggerT = clamp(staggerT + jitterOffset, 0.0, 2.0);
+  staggerT = clamp(staggerT + jitterOffset, 0.0, 1.0);
 
-  // local time with stagger offset — loops every ~4s
+  // apply user-selected easing to the stagger distribution
+  staggerT = applyEasing(staggerT);
+
+  // local time with stagger offset
   float cycleLen = 2.0 + u_stagger;
   float localTime = mod(u_time * u_speed - staggerT * u_stagger, cycleLen);
 
-  // animation: 0→1 appear, hold, 1→0 disappear
+  // per-dot animation: appear / disappear with same easing
   float appear = clamp(localTime / 0.5, 0.0, 1.0);
   float disappear = clamp((localTime - (cycleLen - 0.5)) / 0.5, 0.0, 1.0);
-  float anim = easeOutCubic(appear) * (1.0 - easeInOutQuad(disappear));
+  float anim = applyEasing(appear) * (1.0 - applyEasing(disappear));
 
   // dot: circle in each cell, scaled by animation
   float radius = u_dotSize * 0.5 * anim;
@@ -118,7 +197,7 @@ void main() {
   float dot = smoothstep(radius, radius - 0.02, d);
 
   // color: blend A→B based on stagger distance
-  float colorT = easeInOutQuad(staggerT);
+  float colorT = staggerT;
   vec3 col = mix(u_colorA, u_colorB, colorT);
 
   // subtle brightness pulse per dot
