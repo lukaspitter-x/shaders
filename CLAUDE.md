@@ -66,9 +66,9 @@ docs/            # plan.md, decisions.md
 
 ## Workflow
 
-- **Auto-commit after each major change** — once a feature or fix is verified
-  (typecheck + tests + build pass), commit immediately rather than batching.
-  Don't wait for the user to ask.
+- **Auto-commit _and push_ after each major change** — once a feature or fix is
+  verified (typecheck + tests + build pass), commit **and `git push`**
+  immediately rather than batching. Don't wait for the user to ask.
 
 ## Deviations from the kit (reconciled)
 
