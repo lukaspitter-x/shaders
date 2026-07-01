@@ -7,6 +7,7 @@ uniform vec2 u_resolution;
  * @label Cells
  * @default 20.0
  * @range 4, 48
+ * @step 1
  */
 uniform float u_gridSize;
 

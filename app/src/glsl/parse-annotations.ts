@@ -169,7 +169,8 @@ export function parseShader(source: string): ParsedShader {
         u.control = 'slider';
         u.min = min;
         u.max = max;
-        schema.push({ key: name, label, hint, kind: 'slider', min, max, step: niceStep(min, max) });
+        const step = values.step !== undefined ? Number(values.step) : niceStep(min, max);
+        schema.push({ key: name, label, hint, kind: 'slider', min, max, step });
       } else {
         u.control = 'number';
         schema.push({ key: name, label, hint, kind: 'number' });
