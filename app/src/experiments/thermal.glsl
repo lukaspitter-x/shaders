@@ -225,6 +225,17 @@ uniform float u_fresnel;
 
 // SECTION: Effects
 /**
+ * Opposite of Fresnel — darkens the viewer-facing centre of the ball, setting how
+ * much of the core stays black. Higher pushes the dark region further out toward
+ * the rim; 0 leaves only the natural falloff.
+ * @label Dark Core
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_darkCore;
+
+// SECTION: Effects
+/**
  * Strength of the shadow the ball casts on the wall — a directional lobe thrown
  * away from the lit side, plus a faint seam AO. Softness with distance is set by
  * Depth Blur.
@@ -449,6 +460,8 @@ void main() {
 
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
+  // Opposite fresnel: carve a dark core out of the viewer-facing centre (high z).
+  tBall *= 1.0 - smoothstep(1.0 - u_darkCore, 1.0, z);
 
   // --- Bloom / Glow: the Diffuse Scatter mirrored across the silhouette ---
   // Inside the ball the scatter is pow(1 - z, 2), crisp at the rim and fading
