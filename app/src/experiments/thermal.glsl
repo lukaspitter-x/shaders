@@ -312,6 +312,16 @@ uniform float u_darkCore;
 
 // SECTION: Effects
 /**
+ * Adds pure black into the dark core. The Dark Core alone bottoms out at the
+ * palette's tinted near-black; push this up to crush the centre to true black.
+ * @label Core Black
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_coreBlack;
+
+// SECTION: Effects
+/**
  * Strength of the shadow the ball casts on the wall — a directional lobe thrown
  * away from the lit side, plus a faint seam AO. Softness with distance is set by
  * Depth Blur.
@@ -548,7 +558,8 @@ void main() {
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
   // Opposite fresnel: carve a dark core out of the viewer-facing centre (high z).
-  tBall *= 1.0 - smoothstep(1.0 - u_darkCore, 1.0, z);
+  float coreMask = smoothstep(1.0 - u_darkCore, 1.0, z); // 1 at centre → 0 at rim
+  tBall *= 1.0 - coreMask;
 
   // --- Bloom / Glow: the Diffuse Scatter mirrored across the silhouette ---
   // Inside the ball the scatter is pow(1 - z, 2), crisp at the rim and fading
@@ -604,6 +615,8 @@ void main() {
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
   vec3 ballCol = shadeRGB(tBall, keyLin);
+  // Core Black: crush the core toward true black, past the palette's tinted floor.
+  ballCol *= 1.0 - u_coreBlack * coreMask;
 
   float px = 1.0 / (R * u_resolution.y);
   float ballMask = smoothstep(1.0 + 1.5 * px, 1.0 - 1.5 * px, r);
