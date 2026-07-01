@@ -123,8 +123,20 @@ uniform float u_loopDur;
 
 // SECTION: Light
 /**
- * Width of the travelling light stripe — low is a broad, soft wash across the
- * wall; high concentrates it into a narrow, defined band.
+ * How many light stripes cross the frame at once. Low is a single travelling
+ * stripe; raise it for a repeating sequence of stripes marching right→left, all
+ * driving the wall, rim and shadows together.
+ * @label Stripe Density
+ * @default 0.5
+ * @range 0.25, 8
+ */
+uniform float u_density;
+
+// SECTION: Light
+/**
+ * Width of the travelling light stripes — low is a broad, soft wash; high
+ * concentrates each into a narrow, defined band. Capped to stay distinct as
+ * density rises.
  * @label Stripe Width
  * @default 1
  * @range 0.2, 4
@@ -373,10 +385,15 @@ void main() {
   float z = sqrt(max(1.0 - r * r, 0.0));
   vec2 outward = normalize(c + vec2(1.0e-5));
 
-  // --- The travelling softbox stripe (single source of light) ---
-  const float P = 4.0;                                  // travel period
+  // --- The travelling softbox stripes (single source of light) ---
+  // Density sets how many stripes span the frame: period P = 2 / density (the
+  // frame is 2 wide in nx). The field is periodic in P, so any number of stripes
+  // scrolls seamlessly. Width is capped to a fraction of P so stripes stay
+  // distinct rather than merging into a wash as density climbs.
+  float P = 2.0 / max(u_density, 0.2);
   float scroll = fract(u_time / max(u_loopDur, 0.1)) * P;
-  float stripeW = mix(1.3, 0.3, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
+  float baseW = mix(1.3, 0.3, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
+  float stripeW = min(baseW, P * 0.4);
 
   // Dispersion = a small per-channel SPATIAL offset of where each colour samples
   // the stripe. R/G/B thus read genuine palette colours a hair apart → a blue↔
@@ -439,8 +456,9 @@ void main() {
   // Depth Blur sets how far and how softly the shadow reaches — crisp and tight
   // at low blur, long and diffuse at high blur (an area-light penumbra).
   float ballCenterNx = u_ballX / aspect;
-  float sLeft = stripeField(ballCenterNx - 0.6, scroll, stripeW, P);
-  float sRight = stripeField(ballCenterNx + 0.6, scroll, stripeW, P);
+  float so = min(0.6, P * 0.3);   // sample the gradient within the nearest stripe
+  float sLeft = stripeField(ballCenterNx - so, scroll, stripeW, P);
+  float sRight = stripeField(ballCenterNx + so, scroll, stripeW, P);
   // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
