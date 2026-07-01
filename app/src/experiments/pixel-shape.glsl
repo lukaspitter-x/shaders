@@ -21,6 +21,15 @@ uniform float u_gridSize;
 uniform float u_gap;
 
 /**
+ * Show grid lines at cell boundaries.
+ * @section Grid
+ * @label Show Grid
+ * @switch
+ * @default 0
+ */
+uniform float u_showGrid;
+
+/**
  * @section Shape
  * @label Type
  * @select Circle, Square, Diamond, Hexagon, Star
@@ -151,5 +160,22 @@ void main() {
     vec3 col = mix(u_colorA, u_colorB, t);
 
     float mask = inGrid * isOn * cellVis;
-    gl_FragColor = vec4(mix(u_bg, col, mask), 1.0);
+    vec3 result = mix(u_bg, col, mask);
+
+    if (u_showGrid > 0.5) {
+        float lineW = 1.0 / cellPx;
+        float onLineX = step(cellUV.x, lineW) + step(1.0 - lineW, cellUV.x);
+        float onLineY = step(cellUV.y, lineW) + step(1.0 - lineW, cellUV.y);
+        float gridLine = clamp(onLineX + onLineY, 0.0, 1.0) * inGrid;
+
+        float borderX = step(pos.x, lineW) + step(gridN - lineW, pos.x);
+        float borderY = step(pos.y, lineW) + step(gridN - lineW, pos.y);
+        float border = clamp(borderX + borderY, 0.0, 1.0) * inGrid;
+
+        vec3 lineCol = mix(vec3(1.0), vec3(0.0), step(0.5, (u_bg.r + u_bg.g + u_bg.b) / 3.0));
+        result = mix(result, lineCol * 0.25, gridLine * 0.5);
+        result = mix(result, lineCol * 0.5, border * 0.7);
+    }
+
+    gl_FragColor = vec4(result, 1.0);
 }
