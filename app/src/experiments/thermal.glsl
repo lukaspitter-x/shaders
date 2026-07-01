@@ -214,6 +214,16 @@ uniform float u_contact;
 
 // SECTION: Effects
 /**
+ * Flip the cast shadow to the opposite side of the ball — toward the softbox
+ * instead of away from it.
+ * @label Flip Shadow
+ * @switch
+ * @default 0
+ */
+uniform float u_flipShadow;
+
+// SECTION: Effects
+/**
  * Ambient fill so the shadow side never drops fully to black.
  * @label Ambient
  * @default 0.18
@@ -424,7 +434,8 @@ void main() {
   float sideAmt = clamp(abs(sRight - sLeft) * 3.0, 0.0, 1.0); // 0 when light is head-on
   // Same mirrored-dome profile as the bloom, but subtracting light on the side
   // away from the softbox — crisp at the seam, diffusing progressively outward.
-  float antiLight = clamp(dot(outward, -Lv) * 0.5 + 0.5, 0.0, 1.0); // 1 dark side .. 0 lit side
+  float sgn = mix(1.0, -1.0, u_flipShadow);                        // flip → shadow toward light
+  float antiLight = clamp(dot(outward, -Lv) * sgn * 0.5 + 0.5, 0.0, 1.0); // 1 shadow side .. 0 other
   float shadowDome = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
   float castShadow = shadowDome * mix(0.2, 1.0, antiLight * sideAmt);
   tBg = max(tBg * (1.0 - clamp(u_contact * castShadow * 1.7, 0.0, 0.93)), 0.0);
