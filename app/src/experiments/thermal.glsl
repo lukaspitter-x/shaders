@@ -191,9 +191,10 @@ uniform float u_fresnel;
 
 // SECTION: Effects
 /**
- * Contact / ambient shadow: darkening of the wall hugging the ball, where the
- * ball occludes ambient light.
- * @label Contact Shadow
+ * Strength of the shadow the ball casts on the wall — a directional lobe thrown
+ * away from the lit side, plus a faint seam AO. Softness with distance is set by
+ * Depth Blur.
+ * @label Cast Shadow
  * @default 0.5
  * @range 0, 1
  */
@@ -210,9 +211,10 @@ uniform float u_ambient;
 
 // SECTION: Effects
 /**
- * Depth blur — softens the wall light progressively with distance from the ball,
- * like ambient occlusion / an area-light penumbra. The seam stays crisp while the
- * wall recedes out of focus, selling the ball as a hemisphere set into the wall.
+ * Depth blur — softens both the wall light AND the cast shadow progressively with
+ * distance from the ball, like an area-light penumbra. The seam stays crisp while
+ * light and shadow recede out of focus, selling the ball as a hemisphere set into
+ * the wall.
  * @label Depth Blur
  * @default 0.5
  * @range 0, 1
@@ -373,9 +375,26 @@ void main() {
   vec3 halo = outer * outer * ballLit * (u_bloom + 0.5 * u_emissive);
   tBg += halo;
 
-  // Contact / ambient shadow: the ball occludes ambient light on the near wall.
-  float contact = 1.0 - smoothstep(1.0, 1.18, r);
-  tBg = max(tBg - u_contact * contact * 0.6, 0.0);
+  // --- Cast shadow on the wall (the shadow half of the pair) ---
+  // The ball blocks the softbox, darkening the wall AWAY from the lit side. Find
+  // the light's horizontal direction from the stripe gradient at the ball, then
+  // darken the wall where it faces away from the light, fading out from the seam.
+  // Depth Blur sets how far and how softly the shadow reaches — crisp and tight
+  // at low blur, long and diffuse at high blur (an area-light penumbra).
+  float ballCenterNx = u_ballX / aspect;
+  float sLeft = stripeField(ballCenterNx - 0.6, scroll, stripeW, P);
+  float sRight = stripeField(ballCenterNx + 0.6, scroll, stripeW, P);
+  vec2 Lv = normalize(vec2(sRight - sLeft, 0.0) + vec2(1.0e-4, 0.0));
+  float sideAmt = clamp(abs(sRight - sLeft) * 3.0, 0.0, 1.0); // 0 when light is head-on
+  float distEdge = max(r - 1.0, 0.0);
+  float antiLight = clamp(dot(outward, -Lv) * 0.5 + 0.5, 0.0, 1.0); // 1 dark side .. 0 lit side
+  float fade = mix(2.5, 0.7, u_depthBlur);                    // more blur → longer, softer reach
+  float aoRing = exp(-distEdge * fade);                       // 1 at seam → 0 outward, soft
+  // Cast shadow: a soft pool hugging the ball, biased strongly to the side away
+  // from the light (plus a faint ring all around), fading — and, via Depth Blur,
+  // softening — with distance.
+  float castShadow = aoRing * mix(0.2, 1.0, antiLight * sideAmt);
+  tBg = max(tBg * (1.0 - clamp(u_contact * castShadow * 1.7, 0.0, 0.93)), 0.0);
 
   // --- Shade both through the ONE palette ---
   // No white blow-out is added: the palette's own highlight (near-white, still
