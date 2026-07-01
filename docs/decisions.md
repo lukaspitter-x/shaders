@@ -244,6 +244,20 @@ undo history is in-memory only.
   For a faithful full-canvas preview there's now a **"Full frame"** builtin host
   (a real positive-inside rect SDF, `0.5 - |py|`) — use that instead of "None".
 
+- **No vec3 *position* control — `vec3` is color-only.** The parser maps a
+  `vec3` uniform to a color picker whenever it's flagged `@color` or its default
+  looks like a hex; there is no 3-slider vector control. So a shader that wants a
+  3D position/direction (e.g. `thermal`'s ball xyz) must declare **three separate
+  `float` uniforms** (`u_ballX/Y/Z`), not one `vec3`. Same applies to any
+  non-color vector until a dedicated vector control is added to
+  `parse-annotations.ts` + the settings layer.
+- **Fake a 3D normal from a 2D circle for cheap "lit sphere" looks.** `thermal`
+  gets Fresnel/diffuse/corona on a sphere without raymarching: for a pixel at
+  normalized radius `r` inside the projected circle, `z = sqrt(1 - r*r)` and
+  `N = normalize(vec3(offset, z))`. Fresnel `pow(1 - z, k)` is 0 on the
+  viewer-facing front (dark) and 1 at the silhouette (bright rim) — an eclipse/
+  corona by construction. Loop-free, so it's trivially Pencil-safe.
+
 ## Still unconfirmed (resolve by minting examples)
 
 - ~~Effect-type input-raster annotation~~ — **Resolved: no shader effect type** (D9).
