@@ -293,10 +293,10 @@ uniform float u_fresnel;
 /**
  * Opposite of Fresnel — darkens the viewer-facing centre of the ball, setting how
  * much of the core stays black. Higher pushes the dark region further out toward
- * the rim; 0 leaves only the natural falloff.
+ * the rim (past 1 it starts dimming the rim too); 0 leaves only the natural falloff.
  * @label Dark Core
  * @default 0.35
- * @range 0, 1
+ * @range 0, 2
  */
 uniform float u_darkCore;
 
@@ -528,7 +528,7 @@ void main() {
 
   // --- Backdrop illumination level: dark base + the bright travelling stripe ---
   float vig = smoothstep(1.7, 0.2, length(p));
-  float bgBase = mix(0.10, 0.28, u_wallBright);
+  float bgBase = mix(0.0, 0.28, u_wallBright);   // floor at 0 so the wall can go fully dark
   float bgGain = mix(0.45, 0.95, u_wallBright);
   float bgMul = (1.0 + 0.3 * u_backdropZ) * mix(1.0, 0.65 + 0.35 * vig, 0.4);
   vec3 tBg = (bgBase + sBg * bgGain) * bgMul;
