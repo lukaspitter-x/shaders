@@ -52,7 +52,7 @@ uniform sampler2D u_falloffCurve;
  * @section Falloff
  * @label Max Size
  * @default 1.0
- * @range 0.1, 1
+ * @range 0.1, 2
  */
 uniform float u_maxSize;
 
@@ -188,52 +188,79 @@ void main() {
     vec2 origin = (u_resolution - gridPx) * 0.5;
     vec2 pos = (gl_FragCoord.xy - origin) / cellPx;
 
-    vec2 cellID = floor(pos);
-    vec2 cellUV = fract(pos);
-
-    float inGrid = step(0.0, cellID.x) * step(0.0, cellID.y)
-                 * step(cellID.x, gridN - 1.0) * step(cellID.y, gridN - 1.0);
-
-    vec2 center = (cellID + 0.5) / gridN - 0.5;
+    vec2 baseID = floor(pos);
+    vec2 baseUV = fract(pos);
 
     float rad = u_rotation * 3.14159 / 180.0;
-    float c = cos(rad);
+    float cs = cos(rad);
     float sn = sin(rad);
-    vec2 rc = vec2(center.x * c - center.y * sn, center.x * sn + center.y * c);
-
-    float dist = shapeDist(rc, u_shape);
+    float modeF = floor(u_mode + 0.5);
     float halfThick = u_thickness / gridN * 0.5;
 
-    float modeF = floor(u_mode + 0.5);
-    float isOn;
-    if (modeF < 0.5) {
-        isOn = step(u_radius - halfThick, dist) * (1.0 - step(u_radius + halfThick, dist));
-    } else {
-        isOn = 1.0 - step(u_radius, dist);
+    float hitMask = 0.0;
+    vec3 hitCol = u_bg;
+    float hitPri = 999.0;
+
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            vec2 nID = baseID + vec2(float(dx), float(dy));
+
+            if (nID.x >= 0.0 && nID.y >= 0.0 && nID.x < gridN && nID.y < gridN) {
+                vec2 nCenter = (nID + 0.5) / gridN - 0.5;
+                vec2 rc = vec2(nCenter.x * cs - nCenter.y * sn,
+                               nCenter.x * sn + nCenter.y * cs);
+
+                float dist = shapeDist(rc, u_shape);
+
+                float isOn;
+                if (modeF < 0.5) {
+                    isOn = step(u_radius - halfThick, dist)
+                         * (1.0 - step(u_radius + halfThick, dist));
+                } else {
+                    isOn = 1.0 - step(u_radius, dist);
+                }
+
+                if (isOn > 0.5) {
+                    float normDist = clamp(dist / max(u_radius, 0.001), 0.0, 1.0);
+                    float curvedDist = texture2D(u_falloffCurve, vec2(normDist, 0.5)).r;
+                    float falloffT = clamp(curvedDist * u_falloff, 0.0, 1.0);
+                    float sizeScale = mix(u_maxSize, u_minSize, falloffT);
+                    float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
+
+                    vec2 pInCell = pos - nID - 0.5;
+                    float d = cellDist(pInCell, u_cellShape);
+
+                    float pw = fwidth(d) * 0.75;
+                    float cellAlpha = 1.0 - smoothstep(halfSize - pw, halfSize + pw, d);
+                    if (cellAlpha > 0.0 && d < hitPri) {
+                        hitPri = d;
+                        hitMask = cellAlpha;
+                        float a = atan(nCenter.y, nCenter.x);
+                        hitCol = mix(u_colorA, u_colorB, a / 6.2832 + 0.5);
+                    }
+                }
+            }
+        }
     }
 
-    float normDist = clamp(dist / max(u_radius, 0.001), 0.0, 1.0);
-    float curvedDist = texture2D(u_falloffCurve, vec2(normDist, 0.5)).r;
-    float falloffT = clamp(curvedDist * u_falloff, 0.0, 1.0);
-    float sizeScale = mix(u_maxSize, u_minSize, falloffT);
-    float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
-    float cellVis = 1.0 - step(halfSize, cellDist(cellUV - 0.5, u_cellShape));
-
-    float angle = atan(center.y, center.x);
-    float t = angle / 6.2832 + 0.5;
-    vec3 col = mix(u_colorA, u_colorB, t);
-
-    float mask = inGrid * isOn * cellVis;
-    vec3 result = mix(u_bg, col, mask);
+    vec3 result = mix(u_bg, hitCol, hitMask);
 
     if (u_showGrid > 0.5) {
+        float inGrid = step(0.0, baseID.x) * step(0.0, baseID.y)
+                     * step(baseID.x, gridN - 1.0) * step(baseID.y, gridN - 1.0);
         float lineW = 1.0 / cellPx;
-        float onLineX = step(cellUV.x, lineW) + step(1.0 - lineW, cellUV.x);
-        float onLineY = step(cellUV.y, lineW) + step(1.0 - lineW, cellUV.y);
+        float gpw = fwidth(baseUV.x) * 0.75;
+        float onLineX = (1.0 - smoothstep(lineW - gpw, lineW + gpw, baseUV.x))
+                       + smoothstep(1.0 - lineW - gpw, 1.0 - lineW + gpw, baseUV.x);
+        float onLineY = (1.0 - smoothstep(lineW - gpw, lineW + gpw, baseUV.y))
+                       + smoothstep(1.0 - lineW - gpw, 1.0 - lineW + gpw, baseUV.y);
         float gridLine = clamp(onLineX + onLineY, 0.0, 1.0) * inGrid;
 
-        float borderX = step(pos.x, lineW) + step(gridN - lineW, pos.x);
-        float borderY = step(pos.y, lineW) + step(gridN - lineW, pos.y);
+        float bpw = fwidth(pos.x) * 0.75;
+        float borderX = (1.0 - smoothstep(lineW - bpw, lineW + bpw, pos.x))
+                       + smoothstep(gridN - lineW - bpw, gridN - lineW + bpw, pos.x);
+        float borderY = (1.0 - smoothstep(lineW - bpw, lineW + bpw, pos.y))
+                       + smoothstep(gridN - lineW - bpw, gridN - lineW + bpw, pos.y);
         float border = clamp(borderX + borderY, 0.0, 1.0) * inGrid;
 
         vec3 lineCol = mix(vec3(1.0), vec3(0.0), step(0.5, (u_bg.r + u_bg.g + u_bg.b) / 3.0));
