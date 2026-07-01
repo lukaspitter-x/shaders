@@ -205,6 +205,17 @@ uniform float u_scatter;
 
 // SECTION: Effects
 /**
+ * Falloff shape of the Diffuse Scatter. Higher spreads the scattered light more
+ * evenly (a softer, more linear falloff) across the ball; lower keeps it tight to
+ * the rim.
+ * @label Scatter Spread
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_scatterSpread;
+
+// SECTION: Effects
+/**
  * Fresnel edge sharpness — a crisp bright line right at the silhouette on top of
  * the soft corona.
  * @label Fresnel Power
@@ -424,7 +435,8 @@ void main() {
   float pEff = mix(10.0, 1.5, clamp(u_coronaWidth, 0.0, 1.0));
   float rimF = pow(1.0 - z, pEff);   // main corona band
   float edge = pow(1.0 - z, 16.0);   // crisp Fresnel edge line
-  float scat = pow(1.0 - z, 2.0);    // scattered fill toward the center
+  float scatExp = mix(3.5, 0.5, u_scatterSpread); // lower exponent → more linear falloff
+  float scat = pow(1.0 - z, scatExp); // scattered fill toward the center
   float rimBase = rimF + u_fresnel * edge + u_scatter * scat;
 
   // --- Backdrop illumination level: dark base + the bright travelling stripe ---
