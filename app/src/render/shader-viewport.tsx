@@ -51,22 +51,12 @@ export function ShaderViewport({
 
   /** Compute the backing resolution, accounting for preview scale override. */
   const resolveSize = (): { w: number; h: number } => {
-    let { w, h } = sizeRef.current;
     const scale = previewScaleRef.current;
-    if (scale !== 'full') {
-      const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
-      const minDim = gridN * scale;
-      if (w >= h) {
-        const aspect = w / h;
-        h = minDim;
-        w = Math.max(1, Math.round(minDim * aspect));
-      } else {
-        const aspect = h / w;
-        w = minDim;
-        h = Math.max(1, Math.round(minDim * aspect));
-      }
-    }
-    return { w, h };
+    if (scale === 'full') return sizeRef.current;
+    const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dim = Math.max(1, Math.round(gridN * scale * dpr));
+    return { w: dim, h: dim };
   };
 
   // Draw one frame from the current refs. Cheap; safe to call any time.
@@ -216,12 +206,16 @@ export function ShaderViewport({
   const lintErrors = lint.filter((f) => f.severity === 'error');
   const lintWarnings = lint.filter((f) => f.severity === 'warning');
 
+  const scaledCssPx = previewScale !== 'full'
+    ? Math.floor(Number(values.u_gridSize) || 20) * previewScale
+    : 0;
+
   return (
-    <div className="relative h-full w-full">
+    <div className={`relative h-full w-full${previewScale !== 'full' ? ' flex items-center justify-center' : ''}`}>
       <canvas
         ref={canvasRef}
-        className="block h-full w-full"
-        style={previewScale !== 'full' ? { imageRendering: 'pixelated' } : undefined}
+        className={previewScale === 'full' ? 'block h-full w-full' : 'block'}
+        style={previewScale !== 'full' ? { width: scaledCssPx, height: scaledCssPx } : undefined}
       />
       {error && (
         <div className="absolute inset-0 flex items-center justify-center p-6">
