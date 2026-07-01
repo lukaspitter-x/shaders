@@ -21,6 +21,24 @@ uniform float u_gridSize;
 uniform float u_gap;
 
 /**
+ * How much cell size varies by distance from center.
+ * @section Grid
+ * @label Falloff
+ * @default 0.0
+ * @range 0, 1
+ */
+uniform float u_falloff;
+
+/**
+ * Smallest cell size when falloff is applied.
+ * @section Grid
+ * @label Min Size
+ * @default 0.1
+ * @range 0.01, 1
+ */
+uniform float u_minSize;
+
+/**
  * Show grid lines at cell boundaries.
  * @section Grid
  * @label Show Grid
@@ -151,9 +169,11 @@ void main() {
         isOn = 1.0 - step(u_radius, dist);
     }
 
-    float g = u_gap * 0.5;
-    float cellVis = step(g, cellUV.x) * step(cellUV.x, 1.0 - g)
-                  * step(g, cellUV.y) * step(cellUV.y, 1.0 - g);
+    float normDist = clamp(dist / max(u_radius, 0.001), 0.0, 1.0);
+    float sizeScale = mix(1.0, u_minSize, normDist * u_falloff);
+    float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
+    vec2 fromCenter = abs(cellUV - 0.5);
+    float cellVis = step(fromCenter.x, halfSize) * step(fromCenter.y, halfSize);
 
     float angle = atan(center.y, center.x);
     float t = angle / 6.2832 + 0.5;
