@@ -148,7 +148,7 @@ export default function App() {
 
   const downloadGlsl = () => {
     if (!selected) return;
-    const glsl = stripHiddenAnnotations(selected.source, presetStore.pencilKeys);
+    const glsl = stripHiddenAnnotations(selected.source, presetStore.pencilKeys, presetStore.values);
     const blob = new Blob([glsl], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
