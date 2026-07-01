@@ -166,6 +166,17 @@ uniform float u_stripeBalance;
 
 // SECTION: Light
 /**
+ * Offsets the timing of the ball's light (and its shadows) relative to the
+ * background stripes, as a fraction of the loop. 0 = in sync; positive delays the
+ * light reaching the ball (arrives later than the tiles), negative advances it.
+ * @label Ball Light Delay
+ * @default 0
+ * @range -0.5, 0.5
+ */
+uniform float u_lightLag;
+
+// SECTION: Light
+/**
  * How far inward from the silhouette the light reaches — thin ring vs broad glow
  * bleeding toward the center.
  * @label Corona Width
@@ -474,6 +485,9 @@ void main() {
   float bandW = max(u_density, 0.03);            // width of one light (or dark) band
   float period = 2.0 * bandW;
   float scroll = fract(u_time / max(u_loopDur, 0.1)) * period;
+  // The ball's light/shadows can lead or lag the wall stripes by a phase offset
+  // (in periods) — so the light reaches the ball sooner or later than the tiles.
+  float ballScroll = scroll + u_lightLag * period;
   float soft = mix(0.05, 1.0, clamp(u_sweepFalloff, 0.0, 1.0));
 
   // Dispersion = a small per-channel SPATIAL offset of where each colour samples
@@ -495,9 +509,9 @@ void main() {
     blurStripe(nx + chOff.z, scroll, period, soft, u_stripeBalance, spread)
   );
   vec3 sBall = vec3(
-    stripeField(bx + chOff.x, scroll, period, soft, u_stripeBalance),
-    stripeField(bx + chOff.y, scroll, period, soft, u_stripeBalance),
-    stripeField(bx + chOff.z, scroll, period, soft, u_stripeBalance)
+    stripeField(bx + chOff.x, ballScroll, period, soft, u_stripeBalance),
+    stripeField(bx + chOff.y, ballScroll, period, soft, u_stripeBalance),
+    stripeField(bx + chOff.z, ballScroll, period, soft, u_stripeBalance)
   );
   vec3 ballLit = u_ambient + (1.0 - u_ambient) * sBall;
 
@@ -548,8 +562,8 @@ void main() {
   // at low blur, long and diffuse at high blur (an area-light penumbra).
   float ballCenterNx = u_ballX / aspect;
   float so = min(0.5, period * 0.25);   // sample the gradient across the nearest band
-  float sLeft = stripeField(ballCenterNx - so, scroll, period, soft, u_stripeBalance);
-  float sRight = stripeField(ballCenterNx + so, scroll, period, soft, u_stripeBalance);
+  float sLeft = stripeField(ballCenterNx - so, ballScroll, period, soft, u_stripeBalance);
+  float sRight = stripeField(ballCenterNx + so, ballScroll, period, soft, u_stripeBalance);
   // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
