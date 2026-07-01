@@ -105,12 +105,22 @@ uniform float u_ballZ;
 
 // SECTION: Backdrop
 /**
- * Base brightness of the backdrop wall.
- * @label Wall Brightness
+ * How dark the dark stripes (troughs) of the wall are. 0 = black.
+ * @label Stripe Dark
  * @default 0.5
  * @range 0, 1
  */
 uniform float u_wallBright;
+
+// SECTION: Backdrop
+/**
+ * How bright the light stripes (peaks) of the wall are — push it up to let them
+ * climb toward white (subject to the Highlight Ceiling).
+ * @label Stripe Light
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_stripeLight;
 
 // SECTION: Backdrop
 /**
@@ -528,10 +538,12 @@ void main() {
 
   // --- Backdrop illumination level: dark base + the bright travelling stripe ---
   float vig = smoothstep(1.7, 0.2, length(p));
-  float bgBase = mix(0.0, 0.28, u_wallBright);   // floor at 0 so the wall can go fully dark
-  float bgGain = mix(0.45, 0.95, u_wallBright);
+  // Stripe endpoints: the grating interpolates from the dark level (trough) to
+  // the light level (peak), each set independently.
+  float darkLevel = mix(0.0, 0.28, u_wallBright);   // how dark the dark bands are (0 = black)
+  float lightLevel = mix(0.1, 1.6, u_stripeLight);  // how bright/white the light bands are
   float bgMul = (1.0 + 0.3 * u_backdropZ) * mix(1.0, 0.65 + 0.35 * vig, 0.4);
-  vec3 tBg = (bgBase + sBg * bgGain) * bgMul;
+  vec3 tBg = mix(vec3(darkLevel), vec3(lightLevel), sBg) * bgMul;
 
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
