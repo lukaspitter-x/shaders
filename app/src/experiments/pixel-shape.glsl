@@ -12,6 +12,15 @@ uniform vec2 u_resolution;
 uniform float u_gridSize;
 
 /**
+ * Shape of individual cells.
+ * @section Grid
+ * @label Cell Shape
+ * @select Square, Circle, Diamond, Hexagon, Star
+ * @default 0
+ */
+uniform float u_cellShape;
+
+/**
  * Space between cells as fraction of cell size.
  * @section Grid
  * @label Gap
@@ -132,6 +141,22 @@ uniform vec3 u_colorB;
  */
 uniform vec3 u_bg;
 
+float cellDist(vec2 p, float s) {
+    float m = floor(s + 0.5);
+    if (m < 0.5) return max(abs(p.x), abs(p.y));
+    if (m < 1.5) return length(p);
+    if (m < 2.5) return abs(p.x) + abs(p.y);
+    if (m < 3.5) {
+        vec2 a = abs(p);
+        return max(a.x * 0.866025 + a.y * 0.5, a.y);
+    }
+    float a = atan(p.y, p.x);
+    float sec = 6.2832 / 5.0;
+    float hs = sec * 0.5;
+    float la = mod(a + hs + 6.2832, sec) - hs;
+    return length(p) / mix(1.0, 0.38, abs(la) / hs);
+}
+
 float shapeDist(vec2 p, float shapeType) {
     float m = floor(shapeType + 0.5);
     if (m < 0.5) {
@@ -192,8 +217,7 @@ void main() {
     float falloffT = clamp(curvedDist * u_falloff, 0.0, 1.0);
     float sizeScale = mix(u_maxSize, u_minSize, falloffT);
     float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
-    vec2 fromCenter = abs(cellUV - 0.5);
-    float cellVis = step(fromCenter.x, halfSize) * step(fromCenter.y, halfSize);
+    float cellVis = 1.0 - step(halfSize, cellDist(cellUV - 0.5, u_cellShape));
 
     float angle = atan(center.y, center.x);
     float t = angle / 6.2832 + 0.5;
