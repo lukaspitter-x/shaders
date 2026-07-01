@@ -176,9 +176,10 @@ uniform float u_stripeBalance;
 
 // SECTION: Light
 /**
- * Offsets the timing of the ball's light (and its shadows) relative to the
- * background stripes, as a fraction of the loop. 0 = in sync; positive delays the
- * light reaching the ball (arrives later than the tiles), negative advances it.
+ * Time-shifts the ball's OWN surface lighting out of sync with the backdrop, as a
+ * fraction of the loop. The stripes and the cast shadow stay on the backdrop
+ * clock; only the ball's rim/corona lead or lag. 0 = in sync; positive = the ball
+ * lights up later than the backdrop, negative = earlier.
  * @label Ball Light Delay
  * @default 0
  * @range -0.5, 0.5
@@ -585,8 +586,10 @@ void main() {
   // at low blur, long and diffuse at high blur (an area-light penumbra).
   float ballCenterNx = u_ballX / aspect;
   float so = min(0.5, period * 0.25);   // sample the gradient across the nearest band
-  float sLeft = stripeField(ballCenterNx - so, ballScroll, period, soft, u_stripeBalance);
-  float sRight = stripeField(ballCenterNx + so, ballScroll, period, soft, u_stripeBalance);
+  // Shadow direction is a BACKDROP effect — keep it on the base scroll (with the
+  // stripes), so Ball Light Delay offsets only the ball's own surface lighting.
+  float sLeft = stripeField(ballCenterNx - so, scroll, period, soft, u_stripeBalance);
+  float sRight = stripeField(ballCenterNx + so, scroll, period, soft, u_stripeBalance);
   // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
