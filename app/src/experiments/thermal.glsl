@@ -214,13 +214,13 @@ uniform float u_contact;
 
 // SECTION: Effects
 /**
- * Flip the cast shadow to the opposite side of the ball — toward the softbox
- * instead of away from it.
- * @label Flip Shadow
- * @switch
- * @default 0
+ * A second cast shadow thrown to the OPPOSITE side of the ball from the first,
+ * with its own strength — as if a fill light sat on the far side. 0 = off.
+ * @label Second Shadow
+ * @default 0.3
+ * @range 0, 1
  */
-uniform float u_flipShadow;
+uniform float u_shadow2;
 
 // SECTION: Effects
 /**
@@ -445,14 +445,20 @@ void main() {
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
   // fades the shadow out near head-on, when there is no clear dark side.
-  float lightX = (sRight - sLeft) * mix(1.0, -1.0, u_flipShadow);
-  float lean = -outward.x * lightX * u_shadowSway * 2.0;      // >0 on the shadow side
-  float dirShadow = clamp(lean, 0.0, 1.0);
-  // Same mirrored-dome profile as the bloom, but subtracting light — crisp at the
-  // seam, diffusing progressively outward. A small floor keeps the ball seated.
-  float shadowDome = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
-  float castShadow = shadowDome * (0.12 + 0.88 * dirShadow);
-  tBg = max(tBg * (1.0 - clamp(u_contact * castShadow * 1.7, 0.0, 0.93)), 0.0);
+  float lightX = sRight - sLeft;                             // smooth signed light direction
+  float lean = -outward.x * lightX * u_shadowSway * 2.0;     // >0 on the far (shadow) side
+  // Linger through centre: a soft dead-zone near zero lean keeps each shadow in
+  // its neutral, seam-only state longer before committing to a side, so it dwells
+  // as the light passes head-on instead of hurrying across.
+  float dirAway = smoothstep(0.15, 1.0, clamp(lean, 0.0, 1.0));
+  float dirToward = smoothstep(0.15, 1.0, clamp(-lean, 0.0, 1.0));
+  // Two mirrored-dome shadows — the primary away from the light, a second one the
+  // opposite way — each crisp at the seam and diffusing outward, with its own reach.
+  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
+  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos);
+  float shadow1 = dome1 * (0.12 + 0.88 * dirAway) * u_contact; // 0.12 floor seats the ball
+  float shadow2 = dome2 * dirToward * u_shadow2;
+  tBg = max(tBg * (1.0 - clamp((shadow1 + shadow2) * 1.7, 0.0, 0.93)), 0.0);
 
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
