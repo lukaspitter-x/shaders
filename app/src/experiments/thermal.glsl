@@ -112,9 +112,9 @@ uniform float u_loopDur;
 
 // SECTION: Light
 /**
- * How sharply the softbox gradient falls off across the frame — low is a broad,
- * gentle wash; high concentrates the light into a narrower travelling band.
- * @label Sweep Falloff
+ * Width of the travelling light stripe — low is a broad, soft wash across the
+ * wall; high concentrates it into a narrow, defined band.
+ * @label Stripe Width
  * @default 1
  * @range 0.2, 4
  */
@@ -259,6 +259,16 @@ vec3 shade(float t, vec3 keyLin) {
   );
 }
 
+// The softbox as a tall vertical stripe of light at horizontal position `x`
+// (in [-1,1] frame units). It's periodic with period P and scrolls left, so it
+// travels right→left and wraps with NO pop — a seamless one-directional loop.
+// Both the wall and the ball rim sample this ONE field, so they stay in sync.
+float stripeField(float x, float scroll, float w, float P) {
+  float d = x + scroll;
+  d = d - P * floor(d / P + 0.5);   // nearest copy, wrapped to [-P/2, P/2]
+  return exp(-(d * d) / (w * w));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
@@ -279,27 +289,22 @@ void main() {
   float z = sqrt(max(1.0 - r * r, 0.0));
   vec2 outward = normalize(c + vec2(1.0e-5));
 
-  // --- The softbox: one horizontal light term drives both surfaces ---
-  // Lx = +1 light from the right, -1 from the left. cos() sweeps right→left→front
-  // and loops seamlessly. Everything downstream reads from this one value, so the
-  // wall gradient and the ball highlight always move together.
-  float phase = fract(u_time / max(u_loopDur, 0.1));
-  float Lx = cos(phase * 6.2831853);
+  // --- The travelling softbox stripe (single source of light) ---
+  const float P = 4.0;                                  // travel period
+  float scroll = fract(u_time / max(u_loopDur, 0.1)) * P;
+  float stripeW = mix(1.9, 0.5, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
 
-  // Signed alignment of a point with the light (-1 shadow side .. +1 lit side).
-  float bgAlign = clamp(nx, -1.0, 1.0) * Lx;
-  float ballAlign = clamp(outward.x, -1.0, 1.0) * Lx;
+  // Wall samples the stripe at its own x. Ball rim samples it a touch further
+  // out along the surface normal, so the lit side follows where the stripe faces.
+  float sBg = stripeField(nx, scroll, stripeW, P);
+  float sBall = stripeField(nx + 0.25 * outward.x, scroll, stripeW, P);
+  float ballLit = u_ambient + (1.0 - u_ambient) * sBall;
 
-  // Softbox falloff shapes how the lit→shadow gradient ramps across the frame.
-  float bgLit = pow(clamp(0.5 + 0.5 * bgAlign, 0.0, 1.0), u_sweepFalloff);
-  float ballLit = u_ambient + (1.0 - u_ambient) *
-      pow(clamp(0.5 + 0.5 * ballAlign, 0.0, 1.0), u_sweepFalloff);
-
-  // --- Backdrop illumination level ---
+  // --- Backdrop illumination level: dark base + the bright travelling stripe ---
   float vig = smoothstep(1.7, 0.2, length(p));
-  float tBg = u_wallBright * (0.35 + 0.85 * bgLit);
+  float tBg = mix(0.10, 0.28, u_wallBright) + sBg * mix(0.45, 0.95, u_wallBright);
   tBg *= 1.0 + 0.3 * u_backdropZ;
-  tBg *= mix(1.0, 0.65 + 0.35 * vig, 0.5);
+  tBg *= mix(1.0, 0.65 + 0.35 * vig, 0.4);
 
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   float pEff = mix(10.0, 1.5, clamp(u_coronaWidth, 0.0, 1.0));
@@ -311,7 +316,7 @@ void main() {
   rimIllum *= u_coronaIntensity;
   float tBall = rimIllum;
 
-  // --- Emissive + bloom spill from the ball onto the wall (in sync via ballLit) ---
+  // --- Emissive + bloom spill from the ball onto the wall (in sync via sBall) ---
   float outer = smoothstep(1.0 + (0.12 + 0.55 * u_bloom), 1.0, r);
   float halo = outer * outer * ballLit * (u_bloom + 0.5 * u_emissive);
   tBg += halo;
@@ -322,6 +327,8 @@ void main() {
   tBg = max(tBg, 0.0);
 
   // --- Shade both through the ONE palette (with dispersion) ---
+  // No white blow-out is added: the palette's own highlight (near-white, still
+  // key-tinted) is the brightest colour, so nothing ever leaves the key family.
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shade(tBg, keyLin);
   vec3 ballCol = shade(tBall, keyLin);
@@ -330,15 +337,11 @@ void main() {
   float ballMask = smoothstep(1.0 + 1.5 * px, 1.0 - 1.5 * px, r);
   vec3 col = mix(bgCol, ballCol, ballMask);
 
-  // Bloom blow-out: extra white where the rim goes super-bright.
-  vec3 hiWhite = mix(keyLin, vec3(1.0), 0.9);
-  col += hiWhite * pow(max(rimIllum - 1.0, 0.0), 1.5) * u_bloom * 0.4 * ballMask;
-
-  // Hue Spread: analogous drift, warmer toward the softbox — applied uniformly to
-  // ball and wall so they stay hue-matched.
-  float alignFinal = mix(bgAlign, ballAlign, ballMask);
+  // Hue Spread: subtle analogous drift, warmer toward the stripe — applied
+  // uniformly to ball and wall so they stay hue-matched.
+  float lit = mix(sBg, sBall, ballMask);
   vec3 hsv = rgb2hsv(col);
-  hsv.x = fract(hsv.x + u_hueSpread * 0.04 * alignFinal);
+  hsv.x = fract(hsv.x + u_hueSpread * 0.03 * (lit - 0.5));
   col = hsv2rgb(hsv);
 
   // Soft filmic clamp keeps highlights from clipping while blacks stay black.
