@@ -55,6 +55,17 @@ uniform float u_hueSpread;
  */
 uniform float u_highlightCap;
 
+// SECTION: Color
+/**
+ * Saturation of the highlights. Low lets bright tones wash toward white; high
+ * keeps them vividly in the key hue (brightening by scaling the colour up instead
+ * of adding white), so ceiled highlights stay colourful rather than grey.
+ * @label Highlight Saturation
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_highlightSat;
+
 // SECTION: Ball
 /**
  * Radius of the ball as a fraction of viewport half-height.
@@ -162,6 +173,17 @@ uniform float u_stripeBalance;
  * @range 0, 1
  */
 uniform float u_coronaWidth;
+
+// SECTION: Light
+/**
+ * Linearity of the rim gradient. 0 hugs the silhouette (the sphere's curvature
+ * concentrates it at the very edge); higher spreads it into an even, more linear
+ * falloff from edge to center instead of a thick edge that drops off fast.
+ * @label Corona Linearity
+ * @default 0.4
+ * @range 0, 1
+ */
+uniform float u_rimLinear;
 
 // SECTION: Light
 /**
@@ -343,10 +365,11 @@ vec3 palette(float t, vec3 keyLin) {
   t = clamp(t, 0.0, 1.2);
   vec3 shadow = keyLin * 0.02;
   vec3 mid = keyLin;
-  // Brighten toward the key's own hue first, only tipping to near-white at the
-  // very top — so wall highlights stay a saturated light-blue, not grey.
-  vec3 hi = mix(keyLin, vec3(1.0), 0.55);
-  vec3 peak = mix(keyLin, vec3(1.0), 0.9);
+  // Highlight tops: blend between washing toward white (low saturation, bright
+  // but grey-ish) and staying vividly in the key hue by scaling the colour up
+  // (high saturation). Highlight Saturation picks the balance.
+  vec3 hi = mix(mix(keyLin, vec3(1.0), 0.55), clamp(keyLin * 2.2, 0.0, 1.0), u_highlightSat);
+  vec3 peak = mix(mix(keyLin, vec3(1.0), 0.9), clamp(keyLin * 3.2, 0.0, 1.0), u_highlightSat);
   if (t < 0.5) return mix(shadow, mid, smoothstep(0.0, 0.5, t));
   if (t < 1.0) return mix(mid, hi, smoothstep(0.5, 1.0, t));
   return mix(hi, peak, smoothstep(1.0, 1.2, t));
@@ -468,10 +491,13 @@ void main() {
 
   // --- Fresnel terms (per-fragment, shared by all channels) ---
   float pEff = mix(10.0, 1.5, clamp(u_coronaWidth, 0.0, 1.0));
-  float rimF = pow(1.0 - z, pEff);   // main corona band
-  float edge = pow(1.0 - z, 16.0);   // crisp Fresnel edge line
+  // Radial basis for the corona: (1 - z) hugs the edge (sphere curvature), r is
+  // linear in radius. Corona Linearity blends between them to spread the gradient.
+  float rimCoord = mix(1.0 - z, r, clamp(u_rimLinear, 0.0, 1.0));
+  float rimF = pow(rimCoord, pEff);  // main corona band
+  float edge = pow(1.0 - z, 16.0);   // crisp Fresnel edge line (kept at the true edge)
   float scatExp = mix(3.5, 0.5, u_scatterSpread); // lower exponent → more linear falloff
-  float scat = pow(1.0 - z, scatExp); // scattered fill toward the center
+  float scat = pow(rimCoord, scatExp); // scattered fill toward the center
   float rimBase = rimF + u_fresnel * edge + u_scatter * u_scatterIntensity * scat;
 
   // --- Backdrop illumination level: dark base + the bright travelling stripe ---
