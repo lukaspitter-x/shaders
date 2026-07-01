@@ -1,0 +1,73 @@
+import type { PresetStore } from './types';
+import { isSeedOnly, pickInitialStore, wouldClobberWorkingCopy } from './working-store';
+
+const PRESETS_ENDPOINT = '/api/sessions';
+const WORKING_ENDPOINT = '/api/working';
+
+async function getJson(endpoint: string): Promise<PresetStore> {
+  try {
+    const res = await fetch(endpoint, { cache: 'no-store' });
+    if (!res.ok) return {};
+    const data = (await res.json()) as PresetStore;
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function loadStores(): Promise<{ store: PresetStore; committed: PresetStore }> {
+  const [working, committed] = await Promise.all([
+    getJson(WORKING_ENDPOINT),
+    getJson(PRESETS_ENDPOINT),
+  ]);
+  return { store: pickInitialStore(working, committed), committed };
+}
+
+export async function saveStore(store: PresetStore): Promise<void> {
+  try {
+    if (isSeedOnly(store)) {
+      const onDisk = await getJson(WORKING_ENDPOINT);
+      if (wouldClobberWorkingCopy(store, onDisk)) {
+        console.warn(
+          '[shaders] Skipped auto-save: a fresh/seed store would have overwritten your ' +
+            'populated working copy. Your saved presets on disk are preserved — reload to pick them up.',
+        );
+        return;
+      }
+    }
+    await fetch(WORKING_ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(store),
+    });
+  } catch (err) {
+    console.error('Failed to save working presets', err);
+  }
+}
+
+export async function savePresets(store: PresetStore): Promise<void> {
+  const res = await fetch(PRESETS_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(store),
+  });
+  if (!res.ok) throw new Error(`Save presets failed: ${res.status}`);
+}
+
+export function flushStore(store: PresetStore): void {
+  const body = JSON.stringify(store);
+  try {
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon(WORKING_ENDPOINT, new Blob([body], { type: 'application/json' }));
+    } else {
+      void fetch(WORKING_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        keepalive: true,
+      });
+    }
+  } catch {
+    /* best-effort */
+  }
+}
