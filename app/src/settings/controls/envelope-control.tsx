@@ -55,6 +55,7 @@ export function EnvelopeControl({
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<number | null>(null);
+  const suppressClickRef = useRef(false);
   const pts = getPoints(value);
 
   const getSvgCoords = useCallback(
@@ -95,9 +96,11 @@ export function EnvelopeControl({
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = idx;
+    suppressClickRef.current = true;
     const move = (ev: PointerEvent) => onMove(ev);
     const up = () => {
       dragRef.current = null;
+      setTimeout(() => { suppressClickRef.current = false; }, 50);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -108,6 +111,7 @@ export function EnvelopeControl({
   const handleClick = useCallback(
     (e: React.PointerEvent) => {
       if (dragRef.current !== null) return;
+      if (suppressClickRef.current) return;
       const svg = svgRef.current;
       if (!svg) return;
       const r = svg.getBoundingClientRect();
@@ -136,8 +140,10 @@ export function EnvelopeControl({
     e.preventDefault();
     e.stopPropagation();
     if (idx === 0 || idx === pts.length - 1) return;
+    suppressClickRef.current = true;
     const next = pts.filter((_, i) => i !== idx);
     onChange(flatten(next));
+    setTimeout(() => { suppressClickRef.current = false; }, 100);
   };
 
   const polyline = pts.map((p) => {

@@ -39,6 +39,15 @@ uniform float u_falloff;
 uniform sampler2D u_falloffCurve;
 
 /**
+ * Largest cell size (fraction of cell).
+ * @section Falloff
+ * @label Max Size
+ * @default 1.0
+ * @range 0.1, 1
+ */
+uniform float u_maxSize;
+
+/**
  * Smallest cell size when falloff is applied.
  * @section Falloff
  * @label Min Size
@@ -181,7 +190,7 @@ void main() {
     float normDist = clamp(dist / max(u_radius, 0.001), 0.0, 1.0);
     float curvedDist = texture2D(u_falloffCurve, vec2(normDist, 0.5)).r;
     float falloffT = clamp(curvedDist * u_falloff, 0.0, 1.0);
-    float sizeScale = mix(1.0, u_minSize, falloffT);
+    float sizeScale = mix(u_maxSize, u_minSize, falloffT);
     float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
     vec2 fromCenter = abs(cellUV - 0.5);
     float cellVis = step(fromCenter.x, halfSize) * step(fromCenter.y, halfSize);
