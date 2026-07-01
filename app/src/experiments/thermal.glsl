@@ -224,6 +224,17 @@ uniform float u_flipShadow;
 
 // SECTION: Effects
 /**
+ * How far the shadow leans to the side as the softbox sweeps — the intensity of
+ * its movement. Low keeps it centred and gentle (it barely follows the light);
+ * high makes it swing decisively with the backdrop gradient.
+ * @label Shadow Sway
+ * @default 1
+ * @range 0, 2
+ */
+uniform float u_shadowSway;
+
+// SECTION: Effects
+/**
  * Ambient fill so the shadow side never drops fully to black.
  * @label Ambient
  * @default 0.18
@@ -430,14 +441,17 @@ void main() {
   float ballCenterNx = u_ballX / aspect;
   float sLeft = stripeField(ballCenterNx - 0.6, scroll, stripeW, P);
   float sRight = stripeField(ballCenterNx + 0.6, scroll, stripeW, P);
-  vec2 Lv = normalize(vec2(sRight - sLeft, 0.0) + vec2(1.0e-4, 0.0));
-  float sideAmt = clamp(abs(sRight - sLeft) * 3.0, 0.0, 1.0); // 0 when light is head-on
-  // Same mirrored-dome profile as the bloom, but subtracting light on the side
-  // away from the softbox — crisp at the seam, diffusing progressively outward.
-  float sgn = mix(1.0, -1.0, u_flipShadow);                        // flip → shadow toward light
-  float antiLight = clamp(dot(outward, -Lv) * sgn * 0.5 + 0.5, 0.0, 1.0); // 1 shadow side .. 0 other
+  // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
+  // normalized, so as the softbox sweeps the value eases through zero and the
+  // shadow slides gently across instead of snapping between sides. Its magnitude
+  // fades the shadow out near head-on, when there is no clear dark side.
+  float lightX = (sRight - sLeft) * mix(1.0, -1.0, u_flipShadow);
+  float lean = -outward.x * lightX * u_shadowSway * 2.0;      // >0 on the shadow side
+  float dirShadow = clamp(lean, 0.0, 1.0);
+  // Same mirrored-dome profile as the bloom, but subtracting light — crisp at the
+  // seam, diffusing progressively outward. A small floor keeps the ball seated.
   float shadowDome = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
-  float castShadow = shadowDome * mix(0.2, 1.0, antiLight * sideAmt);
+  float castShadow = shadowDome * (0.12 + 0.88 * dirShadow);
   tBg = max(tBg * (1.0 - clamp(u_contact * castShadow * 1.7, 0.0, 0.93)), 0.0);
 
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
