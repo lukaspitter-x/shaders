@@ -243,19 +243,24 @@ vec3 palette(float t, vec3 keyLin) {
   t = clamp(t, 0.0, 1.2);
   vec3 shadow = keyLin * 0.02;
   vec3 mid = keyLin;
-  vec3 hi = mix(keyLin, vec3(1.0), 0.9);
+  // Brighten toward the key's own hue first, only tipping to near-white at the
+  // very top — so wall highlights stay a saturated light-blue, not grey.
+  vec3 hi = mix(keyLin, vec3(1.0), 0.55);
+  vec3 peak = mix(keyLin, vec3(1.0), 0.9);
   if (t < 0.5) return mix(shadow, mid, smoothstep(0.0, 0.5, t));
-  return mix(mid, hi, smoothstep(0.5, 1.0, t));
+  if (t < 1.0) return mix(mid, hi, smoothstep(0.5, 1.0, t));
+  return mix(hi, peak, smoothstep(1.0, 1.2, t));
 }
 
-// Dispersion: sample the ramp at slightly offset levels per channel, so steep
-// light transitions fringe warm (R leads) → cool (B lags) like lens dispersion.
-vec3 shade(float t, vec3 keyLin) {
-  float d = u_dispersion * 0.18;
+// Shade a per-channel illumination triple through the ONE palette. Each channel
+// is a genuine palette sample, so the result can never leave the key family — the
+// only way colours separate is Dispersion feeding slightly different levels per
+// channel (a spatial offset upstream), which fringes blue↔white, never magenta.
+vec3 shadeRGB(vec3 t, vec3 keyLin) {
   return vec3(
-    palette(t + d, keyLin).r,
-    palette(t, keyLin).g,
-    palette(t - d, keyLin).b
+    palette(t.x, keyLin).r,
+    palette(t.y, keyLin).g,
+    palette(t.z, keyLin).b
   );
 }
 
@@ -292,46 +297,62 @@ void main() {
   // --- The travelling softbox stripe (single source of light) ---
   const float P = 4.0;                                  // travel period
   float scroll = fract(u_time / max(u_loopDur, 0.1)) * P;
-  float stripeW = mix(1.9, 0.5, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
+  float stripeW = mix(1.3, 0.3, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
 
-  // Wall samples the stripe at its own x. Ball rim samples it a touch further
-  // out along the surface normal, so the lit side follows where the stripe faces.
-  float sBg = stripeField(nx, scroll, stripeW, P);
-  float sBall = stripeField(nx + 0.25 * outward.x, scroll, stripeW, P);
-  float ballLit = u_ambient + (1.0 - u_ambient) * sBall;
+  // Dispersion = a small per-channel SPATIAL offset of where each colour samples
+  // the stripe. R/G/B thus read genuine palette colours a hair apart → a blue↔
+  // white lens fringe, never an invented hue. disp = 0 collapses to one sample.
+  float disp = u_dispersion * 0.05;
+  vec3 chOff = vec3(-disp, 0.0, disp);
 
-  // --- Backdrop illumination level: dark base + the bright travelling stripe ---
-  float vig = smoothstep(1.7, 0.2, length(p));
-  float tBg = mix(0.10, 0.28, u_wallBright) + sBg * mix(0.45, 0.95, u_wallBright);
-  tBg *= 1.0 + 0.3 * u_backdropZ;
-  tBg *= mix(1.0, 0.65 + 0.35 * vig, 0.4);
+  // Wall samples the stripe at its own x; ball rim samples a touch further out
+  // along the normal, so the lit side follows where the stripe faces. Both share
+  // the one field, so wall and ball move together.
+  float bx = nx + 0.25 * outward.x;
+  vec3 sBg = vec3(
+    stripeField(nx + chOff.x, scroll, stripeW, P),
+    stripeField(nx + chOff.y, scroll, stripeW, P),
+    stripeField(nx + chOff.z, scroll, stripeW, P)
+  );
+  vec3 sBall = vec3(
+    stripeField(bx + chOff.x, scroll, stripeW, P),
+    stripeField(bx + chOff.y, scroll, stripeW, P),
+    stripeField(bx + chOff.z, scroll, stripeW, P)
+  );
+  vec3 ballLit = u_ambient + (1.0 - u_ambient) * sBall;
 
-  // --- Ball illumination level (rim only; center → 0 → shadow color) ---
+  // --- Fresnel terms (per-fragment, shared by all channels) ---
   float pEff = mix(10.0, 1.5, clamp(u_coronaWidth, 0.0, 1.0));
   float rimF = pow(1.0 - z, pEff);   // main corona band
   float edge = pow(1.0 - z, 16.0);   // crisp Fresnel edge line
   float scat = pow(1.0 - z, 2.0);    // scattered fill toward the center
-  float rimIllum = (rimF + u_fresnel * edge + u_scatter * scat) * ballLit;
-  rimIllum += u_emissive * rimF;     // self-lit: independent of direction
-  rimIllum *= u_coronaIntensity;
-  float tBall = rimIllum;
+  float rimBase = rimF + u_fresnel * edge + u_scatter * scat;
+
+  // --- Backdrop illumination level: dark base + the bright travelling stripe ---
+  float vig = smoothstep(1.7, 0.2, length(p));
+  float bgBase = mix(0.10, 0.28, u_wallBright);
+  float bgGain = mix(0.45, 0.95, u_wallBright);
+  float bgMul = (1.0 + 0.3 * u_backdropZ) * mix(1.0, 0.65 + 0.35 * vig, 0.4);
+  vec3 tBg = (bgBase + sBg * bgGain) * bgMul;
+
+  // --- Ball illumination level (rim only; center → 0 → shadow color) ---
+  vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
 
   // --- Emissive + bloom spill from the ball onto the wall (in sync via sBall) ---
   float outer = smoothstep(1.0 + (0.12 + 0.55 * u_bloom), 1.0, r);
-  float halo = outer * outer * ballLit * (u_bloom + 0.5 * u_emissive);
+  vec3 halo = outer * outer * ballLit * (u_bloom + 0.5 * u_emissive);
   tBg += halo;
 
   // Contact / ambient shadow: the ball occludes ambient light on the near wall.
   float contact = 1.0 - smoothstep(1.0, 1.18, r);
-  tBg -= u_contact * contact * 0.6;
-  tBg = max(tBg, 0.0);
+  tBg = max(tBg - u_contact * contact * 0.6, 0.0);
 
-  // --- Shade both through the ONE palette (with dispersion) ---
+  // --- Shade both through the ONE palette ---
   // No white blow-out is added: the palette's own highlight (near-white, still
   // key-tinted) is the brightest colour, so nothing ever leaves the key family.
   vec3 keyLin = toLinear(u_key);
-  vec3 bgCol = shade(tBg, keyLin);
-  vec3 ballCol = shade(tBall, keyLin);
+  vec3 bgCol = shadeRGB(tBg, keyLin);
+  vec3 ballCol = shadeRGB(tBall, keyLin);
 
   float px = 1.0 / (R * u_resolution.y);
   float ballMask = smoothstep(1.0 + 1.5 * px, 1.0 - 1.5 * px, r);
@@ -339,7 +360,7 @@ void main() {
 
   // Hue Spread: subtle analogous drift, warmer toward the stripe — applied
   // uniformly to ball and wall so they stay hue-matched.
-  float lit = mix(sBg, sBall, ballMask);
+  float lit = mix(sBg.y, sBall.y, ballMask);
   vec3 hsv = rgb2hsv(col);
   hsv.x = fract(hsv.x + u_hueSpread * 0.03 * (lit - 0.5));
   col = hsv2rgb(hsv);
