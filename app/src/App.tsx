@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Pause, Play } from 'lucide-react';
+import { cn } from '@/lib/cn';
 import {
   Select,
   SelectContent,
@@ -36,6 +37,15 @@ import { EXPERIMENTS } from '@/experiments/registry';
 const valuesKey = (id: string) => `values:${id}`;
 const shapeKey = (id: string) => `shape:${id}`;
 const SELECTED_KEY = 'selected';
+
+type PreviewScale = 'full' | 1 | 2 | 3 | 4;
+const PREVIEW_SCALES: { value: PreviewScale; label: string }[] = [
+  { value: 'full', label: 'Full' },
+  { value: 1, label: '1x' },
+  { value: 2, label: '2x' },
+  { value: 3, label: '3x' },
+  { value: 4, label: '4x' },
+];
 
 /** A stored shape id is usable only if it's "none" or a built-in (custom uploads
  *  are in-memory, so they don't survive a restart). */
@@ -76,6 +86,10 @@ export default function App() {
   // Shape-aware (`@sdf`) shaders need a host shape — "None" feeds an empty SDF, so
   // the shader renders nothing (faithful to a Pencil rectangle, but a dead end here).
   const requiresShape = !!parsed?.system.sdf;
+
+  // Grid preview scale — only meaningful for shaders with a u_gridSize uniform.
+  const [previewScale, setPreviewScale] = useState<PreviewScale>('full');
+  const hasGrid = parsed?.schema.some((c) => c.key === 'u_gridSize') ?? false;
 
   const selectedShape: ShapeDef | null =
     shapeId !== 'none'
@@ -297,6 +311,7 @@ export default function App() {
                   running={running}
                   shape={selectedShape}
                   lint={lint}
+                  previewScale={hasGrid ? previewScale : 'full'}
                 />
               </ErrorBoundary>
             </div>
@@ -320,6 +335,30 @@ export default function App() {
               value={effectiveValues}
               defaults={parsed.defaults}
               onChange={onChange}
+              header={
+                hasGrid ? (
+                  <div className="flex flex-col gap-2">
+                    <span className="heading">Preview</span>
+                    <div className="flex gap-1">
+                      {PREVIEW_SCALES.map((s) => (
+                        <button
+                          key={String(s.value)}
+                          type="button"
+                          onClick={() => setPreviewScale(s.value)}
+                          className={cn(
+                            'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                            previewScale === s.value
+                              ? 'bg-accent text-accent-foreground'
+                              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                          )}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : undefined
+              }
             />
           </ErrorBoundary>
         )}

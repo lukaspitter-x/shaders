@@ -22,6 +22,7 @@ export function ShaderViewport({
   running,
   shape,
   lint,
+  previewScale = 'full',
 }: {
   parsed: ParsedShader;
   fragSource: string;
@@ -30,6 +31,8 @@ export function ShaderViewport({
   /** Host shape: feeds `u_shape` and clips the fill. `null` = full background. */
   shape: ShapeDef | null;
   lint: LintFinding[];
+  /** Grid preview scale: 'full' = native resolution, 1–4 = one cell = N pixels. */
+  previewScale?: 'full' | 1 | 2 | 3 | 4;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<ShaderRenderer | null>(null);
@@ -38,16 +41,38 @@ export function ShaderViewport({
   const sizeRef = useRef({ w: 1, h: 1 });
   const timeRef = useRef(0);
   const mouseRef = useRef<[number, number]>([0, 0]);
+  const previewScaleRef = useRef(previewScale);
   const [error, setError] = useState<string | null>(null);
 
   // Keep the loop's view of settings/shape current without re-running effects.
   valuesRef.current = values;
   shapeRef.current = shape;
+  previewScaleRef.current = previewScale;
+
+  /** Compute the backing resolution, accounting for preview scale override. */
+  const resolveSize = (): { w: number; h: number } => {
+    let { w, h } = sizeRef.current;
+    const scale = previewScaleRef.current;
+    if (scale !== 'full') {
+      const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
+      const minDim = gridN * scale;
+      if (w >= h) {
+        const aspect = w / h;
+        h = minDim;
+        w = Math.max(1, Math.round(minDim * aspect));
+      } else {
+        const aspect = h / w;
+        w = minDim;
+        h = Math.max(1, Math.round(minDim * aspect));
+      }
+    }
+    return { w, h };
+  };
 
   // Draw one frame from the current refs. Cheap; safe to call any time.
   const drawFrame = () => {
     const r = rendererRef.current;
-    const { w, h } = sizeRef.current;
+    const { w, h } = resolveSize();
     if (r && w > 0 && h > 0) r.draw(valuesRef.current, timeRef.current, mouseRef.current, w, h);
   };
 
@@ -163,6 +188,12 @@ export function ShaderViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values]);
 
+  // Redraw when the preview scale changes.
+  useEffect(() => {
+    drawFrame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewScale]);
+
   // The animation loop — only mounted while running. Advances the clock by real
   // elapsed time so pause/resume doesn't jump. (The FPS readout is a separate
   // singleton monitor in the top bar; this loop only renders.)
@@ -187,7 +218,11 @@ export function ShaderViewport({
 
   return (
     <div className="relative h-full w-full">
-      <canvas ref={canvasRef} className="block h-full w-full" />
+      <canvas
+        ref={canvasRef}
+        className="block h-full w-full"
+        style={previewScale !== 'full' ? { imageRendering: 'pixelated' } : undefined}
+      />
       {error && (
         <div className="absolute inset-0 flex items-center justify-center p-6">
           <pre className="max-w-full overflow-auto whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-snug text-destructive">
