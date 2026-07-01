@@ -227,6 +227,18 @@ uniform float u_bloom;
 
 // SECTION: Effects
 /**
+ * Additive glow — a real light-leak layer that STACKS on top (added in linear
+ * light space) from the corona + halo, so it can lift beyond the Highlight
+ * Ceiling and bloom toward white. 0 = off; unlike Bloom/Glow this is not tone-
+ * mapped, so push gently.
+ * @label Additive Glow
+ * @default 0
+ * @range 0, 2
+ */
+uniform float u_glowAdd;
+
+// SECTION: Effects
+/**
  * Diffused, scattered light that spreads the corona deeper across the front face
  * instead of hugging the edge.
  * @label Diffuse Scatter
@@ -523,6 +535,10 @@ void main() {
   float glow = mirrorDome(r, (0.25 + 1.5 * u_bloom) * atmos);
   vec3 halo = glow * ballLit * (u_bloom * 1.3 + 0.5 * u_emissive);
   tBg += halo;
+  // Capture pre-ceiling brightness (rim inside, halo outside) as the light-leak
+  // source, so the additive glow can lift beyond the ceiling that clamps them next.
+  float glowIn = dot(tBall, vec3(0.3333));
+  float glowOut = dot(halo, vec3(0.3333));
 
   // --- Cast shadow on the wall (the shadow half of the pair) ---
   // The ball blocks the softbox, darkening the wall AWAY from the lit side. Find
@@ -574,8 +590,15 @@ void main() {
   hsv.x = fract(hsv.x + u_hueSpread * 0.03 * (lit - 0.5));
   col = hsv2rgb(hsv);
 
-  // Highlights are already governed by the ceiling above; just gamma-encode
-  // (toGamma clamps to [0,1], so hue/dispersion can't push a channel past white).
+  // Additive glow (light-leak): stack a key-tinted glow on top in LINEAR space,
+  // sourced from the pre-ceiling corona/halo. Unlike the tone-mapped bloom this
+  // can push col past 1 → blooms to white at the hottest spots when driven hard.
+  float glowSrc = mix(glowOut, glowIn, ballMask);
+  vec3 glowCol = mix(keyLin, vec3(1.0), 0.5);
+  col += glowCol * glowSrc * u_glowAdd;
+
+  // Gamma-encode (toGamma clamps to [0,1], so hue/dispersion/glow can't push a
+  // channel past white on screen).
   col = toGamma(col);
 
   // Dither to kill gradient banding on the wall.
