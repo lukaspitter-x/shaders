@@ -226,6 +226,16 @@ uniform float u_scatterSpread;
 
 // SECTION: Effects
 /**
+ * Brightness of the scattered light on the ball — boosts the diffuse scatter's
+ * glow independent of its amount and spread. 1 = unchanged.
+ * @label Scatter Intensity
+ * @default 1
+ * @range 0, 4
+ */
+uniform float u_scatterIntensity;
+
+// SECTION: Effects
+/**
  * Fresnel edge sharpness — a crisp bright line right at the silhouette on top of
  * the soft corona.
  * @label Fresnel Power
@@ -462,7 +472,7 @@ void main() {
   float edge = pow(1.0 - z, 16.0);   // crisp Fresnel edge line
   float scatExp = mix(3.5, 0.5, u_scatterSpread); // lower exponent → more linear falloff
   float scat = pow(1.0 - z, scatExp); // scattered fill toward the center
-  float rimBase = rimF + u_fresnel * edge + u_scatter * scat;
+  float rimBase = rimF + u_fresnel * edge + u_scatter * u_scatterIntensity * scat;
 
   // --- Backdrop illumination level: dark base + the bright travelling stripe ---
   float vig = smoothstep(1.7, 0.2, length(p));
