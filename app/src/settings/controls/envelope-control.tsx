@@ -201,6 +201,18 @@ export function EnvelopeControl({
           );
         })}
       </svg>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-muted-foreground/50">Click to add, double-click to remove</p>
+        {onReset && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-[10px] text-muted-foreground/50 hover:text-foreground transition-colors"
+          >
+            Reset
+          </button>
+        )}
+      </div>
     </Field>
   );
 }
