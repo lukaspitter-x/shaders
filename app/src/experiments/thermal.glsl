@@ -44,6 +44,17 @@ uniform vec3 u_key;
  */
 uniform float u_hueSpread;
 
+// SECTION: Color
+/**
+ * Highlight ceiling — caps how bright any tone (bloom, rim, stripe) can get, so
+ * nothing blows out to white and the image never feels overblown. Low keeps a
+ * moody, saturated look; high lets highlights climb toward near-white.
+ * @label Highlight Ceiling
+ * @default 0.6
+ * @range 0.2, 1
+ */
+uniform float u_highlightCap;
+
 // SECTION: Ball
 /**
  * Radius of the ball as a fraction of viewport half-height.
@@ -161,8 +172,9 @@ uniform float u_emissive;
 
 // SECTION: Effects
 /**
- * Fake bloom: soft halo bleeding outside the silhouette onto the wall, plus a
- * white blow-out at the brightest part of the rim.
+ * Fake bloom: the Diffuse Scatter mirrored outward onto the wall — crisp at the
+ * silhouette, diffusing progressively as it spreads. Higher = a wider, softer
+ * glow that reaches farther and blurs more toward its outer edge.
  * @label Bloom / Glow
  * @default 0.8
  * @range 0, 2
@@ -211,10 +223,10 @@ uniform float u_ambient;
 
 // SECTION: Effects
 /**
- * Depth blur — softens both the wall light AND the cast shadow progressively with
- * distance from the ball, like an area-light penumbra. The seam stays crisp while
- * light and shadow recede out of focus, selling the ball as a hemisphere set into
- * the wall.
+ * Depth blur — global depth-of-field: softens the wall light and extends how far
+ * the bloom and cast shadow reach, all progressively with distance from the ball.
+ * The seam stays crisp while everything recedes out of focus, selling the ball as
+ * a hemisphere set into the wall.
  * @label Depth Blur
  * @default 0.5
  * @range 0, 1
@@ -303,6 +315,23 @@ float blurStripe(float x, float scroll, float w, float P, float spread) {
   return sum / wsum;
 }
 
+// The sphere's scatter dome reflected across the silhouette onto the wall: crisp
+// at the edge (r=1) and diffusing progressively softer to nothing at r=1+width —
+// the mirror of the ball's inward Diffuse Scatter. Used for BOTH the outward
+// bloom and the cast shadow, so each is least blurred at the seam, blurrier out.
+float mirrorDome(float r, float width) {
+  float d = clamp((r - 1.0) / max(width, 1.0e-3), 0.0, 1.0);
+  float zMir = sqrt(max(1.0 - (1.0 - d) * (1.0 - d), 0.0));
+  return pow(1.0 - zMir, 2.0) * step(1.0, r);
+}
+
+// Soft highlight ceiling: near-linear below `ceil`, smoothly saturating toward it
+// so no tone blows out to white. k=3 keeps mid-tones close to linear.
+vec3 softClip(vec3 t, float ceil) {
+  vec3 x = t / ceil;
+  return ceil * x / pow(1.0 + x * x * x, vec3(1.0 / 3.0));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
@@ -370,9 +399,16 @@ void main() {
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
 
-  // --- Emissive + bloom spill from the ball onto the wall (in sync via sBall) ---
-  float outer = smoothstep(1.0 + (0.12 + 0.55 * u_bloom), 1.0, r);
-  vec3 halo = outer * outer * ballLit * (u_bloom + 0.5 * u_emissive);
+  // --- Bloom / Glow: the Diffuse Scatter mirrored across the silhouette ---
+  // Inside the ball the scatter is pow(1 - z, 2), crisp at the rim and fading
+  // toward the center. Reflect that dome onto the wall: it starts crisp at the
+  // edge (the reflected silhouette has a hard edge) and grows progressively
+  // softer/more diffuse outward — so the glow is least blurred nearest the ball
+  // and blurrier the farther it reaches. Bloom sets the reach: a small glow stays
+  // tight (little blur), a large one diffuses far (more blur).
+  float atmos = mix(0.7, 1.5, u_depthBlur);   // Depth Blur scales how far glow/shadow reach
+  float glow = mirrorDome(r, (0.25 + 1.5 * u_bloom) * atmos);
+  vec3 halo = glow * ballLit * (u_bloom * 1.3 + 0.5 * u_emissive);
   tBg += halo;
 
   // --- Cast shadow on the wall (the shadow half of the pair) ---
@@ -386,19 +422,19 @@ void main() {
   float sRight = stripeField(ballCenterNx + 0.6, scroll, stripeW, P);
   vec2 Lv = normalize(vec2(sRight - sLeft, 0.0) + vec2(1.0e-4, 0.0));
   float sideAmt = clamp(abs(sRight - sLeft) * 3.0, 0.0, 1.0); // 0 when light is head-on
-  float distEdge = max(r - 1.0, 0.0);
+  // Same mirrored-dome profile as the bloom, but subtracting light on the side
+  // away from the softbox — crisp at the seam, diffusing progressively outward.
   float antiLight = clamp(dot(outward, -Lv) * 0.5 + 0.5, 0.0, 1.0); // 1 dark side .. 0 lit side
-  float fade = mix(2.5, 0.7, u_depthBlur);                    // more blur → longer, softer reach
-  float aoRing = exp(-distEdge * fade);                       // 1 at seam → 0 outward, soft
-  // Cast shadow: a soft pool hugging the ball, biased strongly to the side away
-  // from the light (plus a faint ring all around), fading — and, via Depth Blur,
-  // softening — with distance.
-  float castShadow = aoRing * mix(0.2, 1.0, antiLight * sideAmt);
+  float shadowDome = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
+  float castShadow = shadowDome * mix(0.2, 1.0, antiLight * sideAmt);
   tBg = max(tBg * (1.0 - clamp(u_contact * castShadow * 1.7, 0.0, 0.93)), 0.0);
 
+  // Highlight ceiling: soft-limit every tone so nothing blows out to white.
+  float tCeil = mix(0.6, 1.2, u_highlightCap);
+  tBg = softClip(tBg, tCeil);
+  tBall = softClip(tBall, tCeil);
+
   // --- Shade both through the ONE palette ---
-  // No white blow-out is added: the palette's own highlight (near-white, still
-  // key-tinted) is the brightest colour, so nothing ever leaves the key family.
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
   vec3 ballCol = shadeRGB(tBall, keyLin);
@@ -414,8 +450,8 @@ void main() {
   hsv.x = fract(hsv.x + u_hueSpread * 0.03 * (lit - 0.5));
   col = hsv2rgb(hsv);
 
-  // Soft filmic clamp keeps highlights from clipping while blacks stay black.
-  col = col / (1.0 + col);
+  // Highlights are already governed by the ceiling above; just gamma-encode
+  // (toGamma clamps to [0,1], so hue/dispersion can't push a channel past white).
   col = toGamma(col);
 
   // Dither to kill gradient banding on the wall.
