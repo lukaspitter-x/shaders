@@ -208,6 +208,17 @@ uniform float u_contact;
  */
 uniform float u_ambient;
 
+// SECTION: Effects
+/**
+ * Depth blur — softens the wall light progressively with distance from the ball,
+ * like ambient occlusion / an area-light penumbra. The seam stays crisp while the
+ * wall recedes out of focus, selling the ball as a hemisphere set into the wall.
+ * @label Depth Blur
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_depthBlur;
+
 vec3 toLinear(vec3 c) {
   return pow(c, vec3(2.2));
 }
@@ -274,6 +285,22 @@ float stripeField(float x, float scroll, float w, float P) {
   return exp(-(d * d) / (w * w));
 }
 
+// Progressive blur: average the stripe over a horizontal kernel whose radius is
+// `spread`. Fed a spread that grows with distance from the ball, it stays sharp
+// at the seam and softens into the distance — an AO/penumbra-like depth cue.
+float blurStripe(float x, float scroll, float w, float P, float spread) {
+  const int TAPS = 5;
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int i = 0; i < TAPS; i++) {
+    float o = float(i) - 2.0;            // -2 .. 2
+    float gw = exp(-o * o * 0.5);
+    sum += stripeField(x + o * spread * 0.5, scroll, w, P) * gw;
+    wsum += gw;
+  }
+  return sum / wsum;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
@@ -309,10 +336,13 @@ void main() {
   // along the normal, so the lit side follows where the stripe faces. Both share
   // the one field, so wall and ball move together.
   float bx = nx + 0.25 * outward.x;
+  // Depth blur radius grows with distance outside the ball → crisp seam, soft
+  // distance. The ball rim (r≈1) gets ~0 spread, so it stays sharp.
+  float spread = u_depthBlur * max(r - 1.0, 0.0) * 0.6;
   vec3 sBg = vec3(
-    stripeField(nx + chOff.x, scroll, stripeW, P),
-    stripeField(nx + chOff.y, scroll, stripeW, P),
-    stripeField(nx + chOff.z, scroll, stripeW, P)
+    blurStripe(nx + chOff.x, scroll, stripeW, P, spread),
+    blurStripe(nx + chOff.y, scroll, stripeW, P, spread),
+    blurStripe(nx + chOff.z, scroll, stripeW, P, spread)
   );
   vec3 sBall = vec3(
     stripeField(bx + chOff.x, scroll, stripeW, P),
