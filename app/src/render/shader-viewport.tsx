@@ -54,8 +54,8 @@ export function ShaderViewport({
     const scale = previewScaleRef.current;
     if (scale === 'full') return sizeRef.current;
     const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
-    const ssaa = 8;
-    const dim = Math.max(1, Math.round(gridN * scale * ssaa));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dim = Math.max(1, Math.round(gridN * scale * dpr));
     return { w: dim, h: dim };
   };
 
