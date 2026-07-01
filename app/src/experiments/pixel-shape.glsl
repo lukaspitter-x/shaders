@@ -1,9 +1,9 @@
 /** @resolution */
 uniform vec2 u_resolution;
 
+// SECTION: Grid
 /**
  * Number of cells per side (square grid).
- * @section Grid
  * @label Cells
  * @default 20.0
  * @range 4, 48
@@ -11,130 +11,130 @@ uniform vec2 u_resolution;
  */
 uniform float u_gridSize;
 
+// SECTION: Grid
 /**
  * Shape of individual cells.
- * @section Grid
  * @label Cell Shape
  * @select Square, Circle, Diamond, Hexagon, Star
  * @default 0
  */
 uniform float u_cellShape;
 
+// SECTION: Grid
 /**
  * Space between cells as fraction of cell size.
- * @section Grid
  * @label Gap
  * @default 0.15
  * @range 0, 0.8
  */
 uniform float u_gap;
 
+// SECTION: Falloff
 /**
  * How much cell size varies by distance from center.
- * @section Falloff
  * @label Amount
  * @default 0.0
  * @range 0, 3
  */
 uniform float u_falloff;
 
+// SECTION: Falloff
 /**
  * Shapes the falloff curve.
- * @section Falloff
  * @label Curve
  * @envelope
  * @default 0, 0, 1, 1
  */
 uniform sampler2D u_falloffCurve;
 
+// SECTION: Falloff
 /**
  * Largest cell size (fraction of cell).
- * @section Falloff
  * @label Max Size
  * @default 1.0
  * @range 0.1, 2
  */
 uniform float u_maxSize;
 
+// SECTION: Falloff
 /**
  * Smallest cell size when falloff is applied.
- * @section Falloff
  * @label Min Size
  * @default 0.1
  * @range 0.01, 1
  */
 uniform float u_minSize;
 
+// SECTION: Grid
 /**
  * Show grid lines at cell boundaries.
- * @section Grid
  * @label Show Grid
  * @switch
  * @default 0
  */
 uniform float u_showGrid;
 
+// SECTION: Shape
 /**
- * @section Shape
  * @label Type
  * @select Circle, Square, Diamond, Hexagon, Star
  * @default 0
  */
 uniform float u_shape;
 
+// SECTION: Shape
 /**
- * @section Shape
  * @label Mode
  * @select Ring, Filled
  * @default 0
  */
 uniform float u_mode;
 
+// SECTION: Shape
 /**
  * Shape size relative to half the grid.
- * @section Shape
  * @label Radius
  * @default 0.35
  * @range 0.05, 0.5
  */
 uniform float u_radius;
 
+// SECTION: Shape
 /**
  * Ring width in cells.
- * @section Shape
  * @label Thickness
  * @default 1.0
  * @range 0.5, 5
  */
 uniform float u_thickness;
 
+// SECTION: Shape
 /**
  * Rotate the shape in degrees.
- * @section Shape
  * @label Rotation
  * @default 0.0
  * @range 0, 360
  */
 uniform float u_rotation;
 
+// SECTION: Color
 /**
- * @section Color
  * @label Color A
  * @color
  * @default #e8f48c
  */
 uniform vec3 u_colorA;
 
+// SECTION: Color
 /**
- * @section Color
  * @label Color B
  * @color
  * @default #d6b4fc
  */
 uniform vec3 u_colorB;
 
+// SECTION: Color
 /**
- * @section Color
  * @label Background
  * @color
  * @default #141418

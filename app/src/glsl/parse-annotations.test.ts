@@ -65,6 +65,31 @@ describe('parseShader', () => {
     expect(color).toMatchObject({ kind: 'color', label: 'Color A' });
     expect(parsed.defaults.u_colorA).toBe('#06121f');
   });
+
+  it('groups controls via a `// SECTION:` line comment (Pencil-invisible)', () => {
+    const src = `
+// SECTION: Look
+/** @label A @default 1 @range 0, 2 */
+uniform float u_a;
+
+// SECTION: Look
+/** @label B @default 1 @range 0, 2 */
+uniform float u_b;
+
+// SECTION: Motion
+/** @label C @default 1 @range 0, 2 */
+uniform float u_c;
+
+/** @label D @default 1 @range 0, 2 */
+uniform float u_d;`;
+    const { schema } = parseShader(src);
+    const byKey = (k: string) => schema.find((c) => c.key === k) as { section?: string };
+    expect(byKey('u_a').section).toBe('Look');
+    expect(byKey('u_b').section).toBe('Look');
+    expect(byKey('u_c').section).toBe('Motion');
+    // A uniform with no preceding marker stays ungrouped.
+    expect(byKey('u_d').section).toBeUndefined();
+  });
 });
 
 describe('sanitizeValues', () => {

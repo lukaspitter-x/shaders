@@ -179,5 +179,40 @@ export function lintPencil(source: string): LintFinding[] {
     }
   }
 
+  // Unknown annotation directive. Pencil hard-rejects any `@directive` it does
+  // not recognize (observed: `@section` fails to load). Directives live in doc
+  // comments, so scan the ORIGINAL source (they're stripped from `code`). The
+  // safe set is what genuine Pencil examples use, plus the system directives.
+  const KNOWN_DIRECTIVES = new Set([
+    'label',
+    'default',
+    'range',
+    'color',
+    'resolution',
+    'time',
+    'sdf',
+    'mouse',
+  ]);
+  const DOC_RE = /\/\*\*([\s\S]*?)\*\//g;
+  let doc: RegExpExecArray | null;
+  while ((doc = DOC_RE.exec(source))) {
+    const bodyStart = doc.index + 3;
+    const dirRe = /@(\w+)/g;
+    let dir: RegExpExecArray | null;
+    while ((dir = dirRe.exec(doc[1]))) {
+      if (KNOWN_DIRECTIVES.has(dir[1])) continue;
+      findings.push({
+        severity: 'warning',
+        rule: 'unknown-directive',
+        message: `@${dir[1]} is not a confirmed Pencil directive; Pencil hard-rejects unknown @directives on paste.`,
+        line: lineAt(source, bodyStart + dir.index),
+        suggestion:
+          dir[1] === 'section'
+            ? 'Use a `// SECTION: Name` line comment above the doc block — Pencil ignores line comments.'
+            : 'Remove it or verify Pencil supports it before pasting.',
+      });
+    }
+  }
+
   return findings.sort((a, b) => a.line - b.line);
 }

@@ -45,8 +45,15 @@ export interface ParsedShader {
   envelopes: string[];
 }
 
-/** Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`. */
-const UNIFORM_RE = /\/\*\*([\s\S]*?)\*\/\s*uniform\s+(\w+)\s+(\w+)\s*;/g;
+/**
+ * Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`,
+ * with an optional `// SECTION: Name` line comment above it. Section grouping
+ * lives in a line comment — NOT an `@section` doc tag — because Pencil hard-
+ * rejects any `@directive` it doesn't recognize, while it ignores line comments
+ * entirely (see docs/pencil-compat.md). Groups: 1=section, 2=body, 3=type, 4=name.
+ */
+const UNIFORM_RE =
+  /(?:\/\/\s*SECTION:\s*([^\r\n]+?)\s*\r?\n\s*)?\/\*\*([\s\S]*?)\*\/\s*uniform\s+(\w+)\s+(\w+)\s*;/g;
 
 /** Strip the per-line `*` gutter from a doc-comment body. */
 function cleanBody(body: string): string {
@@ -130,7 +137,7 @@ export function parseShader(source: string): ParsedShader {
   UNIFORM_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = UNIFORM_RE.exec(source))) {
-    const [, body, glslType, name] = m;
+    const [, sectionMarker, body, glslType, name] = m;
     const { description, flags, values } = parseTags(body);
 
     let role: UniformRole = 'user';
@@ -147,7 +154,7 @@ export function parseShader(source: string): ParsedShader {
 
     const label = values.label ?? name;
     const hint = description || undefined;
-    const section = values.section;
+    const section = sectionMarker?.trim() || values.section;
     const u: ParsedUniform = { name, glslType, role, label, hint };
 
     const isColor = flags.has('color') || (glslType === 'vec3' && !!values.default?.startsWith('#'));

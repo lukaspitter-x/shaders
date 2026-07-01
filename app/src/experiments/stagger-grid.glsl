@@ -4,150 +4,150 @@ uniform vec2 u_resolution;
 /** @time */
 uniform float u_time;
 
+// SECTION: Grid
 /**
  * Number of columns in the grid.
- * @section Grid
  * @label Columns
  * @default 10.0
  * @range 2, 24
  */
 uniform float u_cols;
 
+// SECTION: Grid
 /**
  * Number of rows in the grid.
- * @section Grid
  * @label Rows
  * @default 8.0
  * @range 2, 18
  */
 uniform float u_rows;
 
+// SECTION: Grid
 /**
  * Smallest dot size (at animation start/end), relative to cell.
- * @section Grid
  * @label Min Size
  * @default 0.0
  * @range 0, 1
  */
 uniform float u_dotMin;
 
+// SECTION: Grid
 /**
  * Largest dot size (at animation peak), relative to cell.
- * @section Grid
  * @label Max Size
  * @default 0.8
  * @range 0.1, 1
  */
 uniform float u_dotMax;
 
+// SECTION: Stagger
 /**
  * Where the stagger ripple originates.
- * @section Stagger
  * @label Origin
  * @select Center, Corner, Left, Top, Right, Bottom
  * @default 0
  */
 uniform float u_from;
 
+// SECTION: Stagger
 /**
  * How much time offset spreads across the grid (seconds).
- * @section Stagger
  * @label Amount
  * @default 0.6
  * @range 0, 2
  */
 uniform float u_stagger;
 
+// SECTION: Stagger
 /**
  * How much random offset per cell (0 = pure stagger, 1 = noisy).
- * @section Stagger
  * @label Jitter
  * @default 0.0
  * @range 0, 1
  */
 uniform float u_jitter;
 
+// SECTION: Stagger Easing
 /**
  * Controls the stagger distribution — how timing spreads across the grid.
- * @section Stagger Easing
  * @label Type
  * @select Bezier, Spring, Bounce, Elastic
  * @default 0
  */
 uniform float u_staggerEaseType;
 
+// SECTION: Stagger Easing
 /**
  * Shapes the stagger timing curve.
- * @section Stagger Easing
  * @label Curve
  * @bezier
  * @default 0.0, 0.0, 0.58, 1.0
  */
 uniform vec4 u_staggerBezier;
 
+// SECTION: Stagger Easing
 /**
  * Spring stiffness — higher = faster oscillation.
- * @section Stagger Easing
  * @label Stiffness
  * @default 8.0
  * @range 2, 20
  */
 uniform float u_springStiff;
 
+// SECTION: Stagger Easing
 /**
  * Spring / elastic damping — lower = more bouncy.
- * @section Stagger Easing
  * @label Damping
  * @default 5.0
  * @range 1, 15
  */
 uniform float u_springDamp;
 
+// SECTION: Dot Easing
 /**
  * Controls the per-dot appear/disappear animation curve.
- * @section Dot Easing
  * @label Type
  * @select Bezier, Spring, Bounce, Elastic
  * @default 0
  */
 uniform float u_dotEaseType;
 
+// SECTION: Dot Easing
 /**
  * Shapes the dot animation curve.
- * @section Dot Easing
  * @label Curve
  * @bezier
  * @default 0.16, 1.0, 0.3, 1.0
  */
 uniform vec4 u_dotBezier;
 
+// SECTION: Playback
 /**
  * Animation speed.
- * @section Playback
  * @label Speed
  * @default 1.5
  * @range 0.2, 5
  */
 uniform float u_speed;
 
+// SECTION: Playback
 /**
- * @section Playback
  * @label Direction
  * @select Normal, Alternate
  * @default 0
  */
 uniform float u_direction;
 
+// SECTION: Color
 /**
- * @section Color
  * @label Color A
  * @color
  * @default #6c5ce7
  */
 uniform vec3 u_colorA;
 
+// SECTION: Color
 /**
- * @section Color
  * @label Color B
  * @color
  * @default #00cec9

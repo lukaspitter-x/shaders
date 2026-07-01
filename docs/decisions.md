@@ -213,6 +213,20 @@ undo history is in-memory only.
 - **`@resolution`** → `vec2`, canvas size in pixels.
 - **`@color`** → on a `vec3`, with a hex `@default` (e.g. `#0d2b3e`).
 - **`@range a, b`** → on a `float`, drives slider min/max.
+- **Pencil hard-rejects UNKNOWN `@directives`.** Confirmed by paste: a file with
+  `@section` fails to load with *"Unknown annotation directive: @section"*. So the
+  paste-safe directive vocabulary is exactly the confirmed set here —
+  `@label @default @range @color @resolution @time @sdf @mouse` — and **nothing
+  else**. Workbench-only inventions (`@select @switch @step @bezier @envelope`)
+  are **unverified** and likely fail on paste; `lint-pencil.ts` now warns
+  (`unknown-directive`) on any directive outside the confirmed set.
+- **Section grouping is a `// SECTION: Name` LINE COMMENT, never `@section`.**
+  Pencil ignores line comments entirely (genuine `flip-clouds`/`flip-julia` carry
+  `//` comments and load fine), but hard-rejects `@section`. The parser reads the
+  marker from an optional `// SECTION:` line immediately above a uniform's doc
+  block (`parse-annotations.ts` `UNIFORM_RE`), so the same file groups in our
+  panel *and* pastes clean into Pencil. Repeat the marker per-uniform; consecutive
+  same-name markers merge into one collapsible group.
 - **Dialect** → **GLSL ES 1.00 only** (tested — see D8): `gl_FragCoord`,
   `gl_FragColor`, `texture2D`, constant loop bounds, no bitwise/int-`%`. The single
   ES-3.00 borrowing is `textureSize` (and it breaks with 2+ samplers). Entry point

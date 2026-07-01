@@ -72,4 +72,17 @@ void main() {
       'no-discard',
     );
   });
+
+  it('warns on an unknown annotation directive but not on known ones', () => {
+    expect(rules('/** @section Grid @label X @default 1 @range 0, 2 */\nuniform float u_x;')).toContain(
+      'unknown-directive',
+    );
+    expect(rules('/** @label X @color @default #fff */\nuniform vec3 u_c;')).not.toContain(
+      'unknown-directive',
+    );
+    // A `// SECTION:` line comment is invisible to the directive scan.
+    expect(
+      rules('// SECTION: Grid\n/** @label X @default 1 @range 0, 2 */\nuniform float u_x;'),
+    ).not.toContain('unknown-directive');
+  });
 });

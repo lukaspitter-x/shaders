@@ -20,164 +20,164 @@ uniform vec2 u_resolution;
 /** @time */
 uniform float u_time;
 
+// SECTION: Color
 /**
  * The one hue everything is derived from — wall, mid rim, and hotspot are all
  * ramped brightness/temperature siblings of this.
- * @section Color
  * @label Key Color
  * @color
  * @default #1f6bff
  */
 uniform vec3 u_key;
 
+// SECTION: Color
 /**
  * Analogous hue drift across the gradient (warmer toward the light, cooler
  * away). 0 = strict monochrome like the reference; higher = juicier.
- * @section Color
  * @label Hue Spread
  * @default 0.25
  * @range 0, 1
  */
 uniform float u_hueSpread;
 
+// SECTION: Ball
 /**
  * Radius of the ball as a fraction of viewport half-height.
- * @section Ball
  * @label Size
  * @default 0.46
  * @range 0.1, 0.95
  */
 uniform float u_ballSize;
 
+// SECTION: Ball
 /**
  * Horizontal position of the ball center.
- * @section Ball
  * @label Pos X
  * @default 0
  * @range -1, 1
  */
 uniform float u_ballX;
 
+// SECTION: Ball
 /**
  * Vertical position of the ball center.
- * @section Ball
  * @label Pos Y
  * @default 0
  * @range -1, 1
  */
 uniform float u_ballY;
 
+// SECTION: Ball
 /**
  * Depth toward/away from the viewer. Positive pushes the ball closer (larger,
  * softer corona); negative sinks it back.
- * @section Ball
  * @label Depth Z
  * @default 0
  * @range -1, 1
  */
 uniform float u_ballZ;
 
+// SECTION: Backdrop
 /**
  * Base brightness of the backdrop wall.
- * @section Backdrop
  * @label Wall Brightness
  * @default 0.5
  * @range 0, 1
  */
 uniform float u_wallBright;
 
+// SECTION: Backdrop
 /**
  * Move the wall on its Z axis — forward brightens and flattens it, back darkens
  * and deepens the vignette.
- * @section Backdrop
  * @label Backdrop Z
  * @default 0
  * @range -1, 1
  */
 uniform float u_backdropZ;
 
+// SECTION: Light
 /**
  * Seconds for the light to travel once fully around the rim. The loop is
  * seamless at any value.
- * @section Light
  * @label Loop Duration
  * @default 12
  * @range 2, 30
  */
 uniform float u_loopDur;
 
+// SECTION: Light
 /**
  * How far inward from the silhouette the light waves reach — thin ring vs broad
  * glow bleeding toward the center.
- * @section Light
  * @label Corona Width
  * @default 0.5
  * @range 0, 1
  */
 uniform float u_coronaWidth;
 
+// SECTION: Light
 /**
  * Master brightness of the corona.
- * @section Light
  * @label Corona Intensity
  * @default 1.6
  * @range 0, 4
  */
 uniform float u_coronaIntensity;
 
+// SECTION: Effects
 /**
  * Fake emissive material: a self-lit glow on the rim that stays bright even on
  * the side facing away from the light.
- * @section Effects
  * @label Emissive
  * @default 0.35
  * @range 0, 2
  */
 uniform float u_emissive;
 
+// SECTION: Effects
 /**
  * Fake bloom: soft halo bleeding outside the silhouette into the wall, plus a
  * white blow-out at the brightest part of the rim.
- * @section Effects
  * @label Bloom / Glow
  * @default 0.8
  * @range 0, 2
  */
 uniform float u_bloom;
 
+// SECTION: Effects
 /**
  * Diffused, scattered light that spreads the corona deep across the front face
  * instead of hugging the edge.
- * @section Effects
  * @label Diffuse Scatter
  * @default 0.18
  * @range 0, 2
  */
 uniform float u_scatter;
 
+// SECTION: Effects
 /**
  * Fresnel edge sharpness — a crisp bright line right at the silhouette on top of
  * the soft corona.
- * @section Effects
  * @label Fresnel Power
  * @default 0.4
  * @range 0, 2
  */
 uniform float u_fresnel;
 
+// SECTION: Effects
 /**
  * Contact / ambient shadow: darkening of the wall hugging the ball, where the
  * ball occludes ambient light.
- * @section Effects
  * @label Contact Shadow
  * @default 0.5
  * @range 0, 1
  */
 uniform float u_contact;
 
+// SECTION: Effects
 /**
  * Ambient fill so the dark side of the rim never drops fully to black.
- * @section Effects
  * @label Ambient
  * @default 0.18
  * @range 0, 1
