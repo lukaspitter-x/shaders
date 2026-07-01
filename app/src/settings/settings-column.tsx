@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
 import type { SettingsSchema } from './schema';
 import { ControlRenderer } from './control-renderer';
+import { PencilGutter } from './pencil-gutter';
 
 // Collapse state is per-browser editor chrome (not session-preset values), so
 // it lives in localStorage keyed by experiment id — never the git-tracked
@@ -79,6 +80,8 @@ export function SettingsColumn<S>({
   storageKey,
   open = true,
   onClose,
+  pencilKeys,
+  onTogglePencil,
 }: {
   schema: SettingsSchema<S>;
   value: S;
@@ -93,6 +96,10 @@ export function SettingsColumn<S>({
   open?: boolean;
   /** Dismiss handler for the mobile drawer's close button. */
   onClose?: () => void;
+  /** Uniform keys marked as visible in Pencil. */
+  pencilKeys?: Set<string>;
+  /** Toggle a uniform's Pencil visibility. When provided, each control shows a checkbox gutter. */
+  onTogglePencil?: (key: string) => void;
 }) {
   // Persisted collapse state, keyed per `storageKey`. Default = open.
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => loadOpenMap(storageKey));
@@ -145,16 +152,29 @@ export function SettingsColumn<S>({
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-5 p-4">
           {groups.map((group, gi) => {
-            const controls = group.controls.map((control) => (
-              <Fragment key={String(control.key)}>
+            const controls = group.controls.map((control) => {
+              const node = (
                 <ControlRenderer
                   control={control}
                   value={value}
                   defaultValue={defaults[control.key]}
                   onChange={onChange}
                 />
-              </Fragment>
-            ));
+              );
+              const k = String(control.key);
+              return onTogglePencil ? (
+                <PencilGutter
+                  key={k}
+                  checked={!!pencilKeys?.has(k)}
+                  onToggle={() => onTogglePencil(k)}
+                  align={control.kind === 'slider' ? 'center' : 'top'}
+                >
+                  {node}
+                </PencilGutter>
+              ) : (
+                <Fragment key={k}>{node}</Fragment>
+              );
+            });
             return (
               <Fragment key={gi}>
                 {gi > 0 && <Separator />}

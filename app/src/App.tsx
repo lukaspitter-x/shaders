@@ -21,6 +21,7 @@ import { ShaderViewport } from '@/render/shader-viewport';
 import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
 import { imageToSdf } from '@/render/image-sdf';
 import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
+import { stripHiddenAnnotations } from '@/glsl/strip-annotations';
 import { usePresets } from '@/presets/use-presets';
 import { PresetSwitcher } from '@/presets/preset-switcher';
 import { EXPERIMENTS } from '@/experiments/registry';
@@ -147,7 +148,8 @@ export default function App() {
 
   const downloadGlsl = () => {
     if (!selected) return;
-    const blob = new Blob([selected.source], { type: 'text/plain' });
+    const glsl = stripHiddenAnnotations(selected.source, presetStore.pencilKeys);
+    const blob = new Blob([glsl], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -262,6 +264,8 @@ export default function App() {
               value={presetStore.values}
               defaults={parsed.defaults}
               onChange={onChange}
+              pencilKeys={presetStore.pencilKeys}
+              onTogglePencil={presetStore.togglePencilKey}
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />

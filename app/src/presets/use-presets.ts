@@ -189,6 +189,9 @@ export interface UsePresets {
   dirty: boolean;
   commitPresets: () => void;
   revertToPresets: () => void;
+  /** Uniform keys marked as visible in Pencil's settings panel. */
+  pencilKeys: Set<string>;
+  togglePencilKey: (key: string) => void;
 }
 
 export function usePresets(
@@ -229,6 +232,23 @@ export function usePresets(
   }, [active?.values, defaults, schema]);
 
   const ready = !!entry;
+
+  const pencilKeys = useMemo(
+    () => new Set<string>(entry?.pencilKeys ?? []),
+    [entry?.pencilKeys],
+  );
+
+  const togglePencilKey = useCallback(
+    (key: string) => {
+      setEntry(shaderId, (e) => {
+        const prev = new Set(e.pencilKeys ?? []);
+        if (prev.has(key)) prev.delete(key);
+        else prev.add(key);
+        return { ...e, pencilKeys: [...prev] };
+      });
+    },
+    [shaderId],
+  );
 
   const hist = active ? histories.get(histKeyFor(shaderId, active.id)) : undefined;
   const undo = useCallback(() => undoActive(shaderId), [shaderId]);
@@ -360,5 +380,7 @@ export function usePresets(
     dirty,
     commitPresets: commitPresetsAction,
     revertToPresets: revertToPresetsAction,
+    pencilKeys,
+    togglePencilKey,
   };
 }
