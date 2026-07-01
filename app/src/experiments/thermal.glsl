@@ -123,23 +123,22 @@ uniform float u_loopDur;
 
 // SECTION: Light
 /**
- * How many light stripes cross the frame at once. Low is a single travelling
- * stripe; raise it for a repeating sequence of stripes marching right→left, all
- * driving the wall, rim and shadows together.
- * @label Stripe Density
+ * Width of each band in the light grating. Light and dark bands are always equal
+ * width; this sets how wide they are — small = many thin stripes, large = a few
+ * wide ones. They all march right→left, driving wall, rim and shadows together.
+ * @label Stripe Width
  * @default 0.5
- * @range 0.25, 8
+ * @range 0.05, 1.5
  */
 uniform float u_density;
 
 // SECTION: Light
 /**
- * Width of the travelling light stripes — low is a broad, soft wash; high
- * concentrates each into a narrow, defined band. Capped to stay distinct as
- * density rises.
- * @label Stripe Width
- * @default 1
- * @range 0.2, 4
+ * Edge softness of the stripes — 0 is a hard-edged square grating, 1 is a smooth
+ * sine gradient. Band widths stay equal either way.
+ * @label Stripe Softness
+ * @default 0.6
+ * @range 0, 1
  */
 uniform float u_sweepFalloff;
 
@@ -337,23 +336,25 @@ vec3 shadeRGB(vec3 t, vec3 keyLin) {
 // (in [-1,1] frame units). It's periodic with period P and scrolls left, so it
 // travels right→left and wraps with NO pop — a seamless one-directional loop.
 // Both the wall and the ball rim sample this ONE field, so they stay in sync.
-float stripeField(float x, float scroll, float w, float P) {
-  float d = x + scroll;
-  d = d - P * floor(d / P + 0.5);   // nearest copy, wrapped to [-P/2, P/2]
-  return exp(-(d * d) / (w * w));
+float stripeField(float x, float scroll, float period, float soft) {
+  // Regular grating: cos crosses zero at even spacing, so the bright and dark
+  // bands are equal width. `period` is one light+dark pair; `soft` morphs a hard
+  // square (→0) to a smooth sine (→1). Both wall and ball rim sample this field.
+  float s = cos((x + scroll) / period * 6.2831853);
+  return smoothstep(-soft, soft, s);
 }
 
-// Progressive blur: average the stripe over a horizontal kernel whose radius is
+// Progressive blur: average the grating over a horizontal kernel whose radius is
 // `spread`. Fed a spread that grows with distance from the ball, it stays sharp
 // at the seam and softens into the distance — an AO/penumbra-like depth cue.
-float blurStripe(float x, float scroll, float w, float P, float spread) {
+float blurStripe(float x, float scroll, float period, float soft, float spread) {
   const int TAPS = 5;
   float sum = 0.0;
   float wsum = 0.0;
   for (int i = 0; i < TAPS; i++) {
     float o = float(i) - 2.0;            // -2 .. 2
     float gw = exp(-o * o * 0.5);
-    sum += stripeField(x + o * spread * 0.5, scroll, w, P) * gw;
+    sum += stripeField(x + o * spread * 0.5, scroll, period, soft) * gw;
     wsum += gw;
   }
   return sum / wsum;
@@ -396,15 +397,15 @@ void main() {
   float z = sqrt(max(1.0 - r * r, 0.0));
   vec2 outward = normalize(c + vec2(1.0e-5));
 
-  // --- The travelling softbox stripes (single source of light) ---
-  // Density sets how many stripes span the frame: period P = 2 / density (the
-  // frame is 2 wide in nx). The field is periodic in P, so any number of stripes
-  // scrolls seamlessly. Width is capped to a fraction of P so stripes stay
-  // distinct rather than merging into a wash as density climbs.
-  float P = 2.0 / max(u_density, 0.2);
-  float scroll = fract(u_time / max(u_loopDur, 0.1)) * P;
-  float baseW = mix(1.3, 0.3, clamp((u_sweepFalloff - 0.2) / 3.8, 0.0, 1.0));
-  float stripeW = min(baseW, P * 0.4);
+  // --- The travelling light grating (single source of light) ---
+  // Regular equal-width light/dark stripes. Stripe Width sets the band width
+  // (period = 2 × width); Stripe Softness morphs a sharp square ↔ a smooth sine.
+  // The grating scrolls right→left and loops seamlessly, and the wall, rim and
+  // both shadows all sample this ONE field so they move together.
+  float bandW = max(u_density, 0.03);            // width of one light (or dark) band
+  float period = 2.0 * bandW;
+  float scroll = fract(u_time / max(u_loopDur, 0.1)) * period;
+  float soft = mix(0.05, 1.0, clamp(u_sweepFalloff, 0.0, 1.0));
 
   // Dispersion = a small per-channel SPATIAL offset of where each colour samples
   // the stripe. R/G/B thus read genuine palette colours a hair apart → a blue↔
@@ -420,14 +421,14 @@ void main() {
   // distance. The ball rim (r≈1) gets ~0 spread, so it stays sharp.
   float spread = u_depthBlur * max(r - 1.0, 0.0) * 0.6;
   vec3 sBg = vec3(
-    blurStripe(nx + chOff.x, scroll, stripeW, P, spread),
-    blurStripe(nx + chOff.y, scroll, stripeW, P, spread),
-    blurStripe(nx + chOff.z, scroll, stripeW, P, spread)
+    blurStripe(nx + chOff.x, scroll, period, soft, spread),
+    blurStripe(nx + chOff.y, scroll, period, soft, spread),
+    blurStripe(nx + chOff.z, scroll, period, soft, spread)
   );
   vec3 sBall = vec3(
-    stripeField(bx + chOff.x, scroll, stripeW, P),
-    stripeField(bx + chOff.y, scroll, stripeW, P),
-    stripeField(bx + chOff.z, scroll, stripeW, P)
+    stripeField(bx + chOff.x, scroll, period, soft),
+    stripeField(bx + chOff.y, scroll, period, soft),
+    stripeField(bx + chOff.z, scroll, period, soft)
   );
   vec3 ballLit = u_ambient + (1.0 - u_ambient) * sBall;
 
@@ -468,9 +469,9 @@ void main() {
   // Depth Blur sets how far and how softly the shadow reaches — crisp and tight
   // at low blur, long and diffuse at high blur (an area-light penumbra).
   float ballCenterNx = u_ballX / aspect;
-  float so = min(0.6, P * 0.3);   // sample the gradient within the nearest stripe
-  float sLeft = stripeField(ballCenterNx - so, scroll, stripeW, P);
-  float sRight = stripeField(ballCenterNx + so, scroll, stripeW, P);
+  float so = min(0.5, period * 0.25);   // sample the gradient across the nearest band
+  float sLeft = stripeField(ballCenterNx - so, scroll, period, soft);
+  float sRight = stripeField(ballCenterNx + so, scroll, period, soft);
   // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
