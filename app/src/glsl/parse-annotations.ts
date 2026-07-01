@@ -41,6 +41,8 @@ export interface ParsedShader {
   system: { resolution?: string; time?: string; mouse?: string; sdf?: string };
   /** User image sampler uniform names (sampler2D with @label, not @sdf). */
   images: string[];
+  /** Envelope curve sampler uniform names (sampler2D with @envelope). */
+  envelopes: string[];
 }
 
 /** Matches a `/** ... *\/` doc block immediately preceding a `uniform T name;`. */
@@ -123,6 +125,7 @@ export function parseShader(source: string): ParsedShader {
   const defaults: ShaderValues = {};
   const system: ParsedShader['system'] = {};
   const images: string[] = [];
+  const envelopes: string[] = [];
 
   UNIFORM_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -179,6 +182,14 @@ export function parseShader(source: string): ParsedShader {
         u.control = 'number';
         schema.push({ key: name, label, hint, kind: 'number' });
       }
+    } else if (glslType === 'sampler2D' && flags.has('envelope')) {
+      u.control = 'envelope' as typeof u.control;
+      const pts = values.default
+        ? values.default.split(',').map((s) => Number(s.trim()))
+        : [0, 0, 1, 1];
+      defaults[name] = pts;
+      schema.push({ key: name, label, hint, kind: 'envelope' });
+      envelopes.push(name);
     } else if (glslType === 'sampler2D') {
       u.control = 'image';
       u.default = '';
@@ -196,5 +207,5 @@ export function parseShader(source: string): ParsedShader {
     uniforms.push(u);
   }
 
-  return { uniforms, schema, defaults, system, images };
+  return { uniforms, schema, defaults, system, images, envelopes };
 }

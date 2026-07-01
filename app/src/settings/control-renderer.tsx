@@ -9,6 +9,7 @@ import { ColorControl } from './controls/color-control';
 import { Vec3Control, type Vec3 } from './controls/vec3-control';
 import { ImageControl } from './controls/image-control';
 import { BezierControl, type Bezier } from './controls/bezier-control';
+import { EnvelopeControl, type Envelope } from './controls/envelope-control';
 
 /** Render a single declarative control against the current settings object. */
 function ControlRendererImpl<S>({
@@ -128,6 +129,16 @@ function ControlRendererImpl<S>({
           label={control.label}
           hint={control.hint}
           value={v as Bezier}
+          onChange={set}
+          onReset={onReset}
+        />
+      );
+    case 'envelope':
+      return (
+        <EnvelopeControl
+          label={control.label}
+          hint={control.hint}
+          value={v as Envelope}
           onChange={set}
           onReset={onReset}
         />

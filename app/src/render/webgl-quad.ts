@@ -53,10 +53,59 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
   let hasSdf = false;
 
   // User image textures (sampler2D with @label). Keyed by uniform name.
-  // SDF occupies texture unit 0; images start at unit 1.
+  // SDF occupies texture unit 0; images start at unit 1; envelopes follow.
   const imageTextures = new Map<string, WebGLTexture>();
   let imageUnitMap = new Map<string, number>();
   let imageNames: string[] = [];
+
+  // Envelope curve textures (sampler2D with @envelope). 256px 1D LUT.
+  const envelopeTextures = new Map<string, WebGLTexture>();
+  let envelopeUnitMap = new Map<string, number>();
+  let envelopeNames: string[] = [];
+  const envelopeCache = new Map<string, string>();
+
+  function bakeEnvelope(uniformName: string, points: number[]): void {
+    const pts: [number, number][] = [];
+    for (let i = 0; i < points.length - 1; i += 2) {
+      pts.push([points[i], points[i + 1]]);
+    }
+    pts.sort((a, b) => a[0] - b[0]);
+
+    const SIZE = 256;
+    const data = new Uint8Array(SIZE);
+    for (let i = 0; i < SIZE; i++) {
+      const t = i / (SIZE - 1);
+      let y = 0;
+      if (pts.length === 0) {
+        y = t;
+      } else if (pts.length === 1) {
+        y = pts[0][1];
+      } else {
+        if (t <= pts[0][0]) { y = pts[0][1]; }
+        else if (t >= pts[pts.length - 1][0]) { y = pts[pts.length - 1][1]; }
+        else {
+          for (let j = 0; j < pts.length - 1; j++) {
+            if (t >= pts[j][0] && t <= pts[j + 1][0]) {
+              const seg = pts[j + 1][0] - pts[j][0];
+              const f = seg > 0 ? (t - pts[j][0]) / seg : 0;
+              y = pts[j][1] + f * (pts[j + 1][1] - pts[j][1]);
+              break;
+            }
+          }
+        }
+      }
+      data[i] = Math.round(Math.max(0, Math.min(1, y)) * 255);
+    }
+
+    let tex = envelopeTextures.get(uniformName);
+    if (!tex) { tex = gl!.createTexture()!; envelopeTextures.set(uniformName, tex); }
+    gl!.bindTexture(gl!.TEXTURE_2D, tex);
+    gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.LUMINANCE, SIZE, 1, 0, gl!.LUMINANCE, gl!.UNSIGNED_BYTE, data);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_S, gl!.CLAMP_TO_EDGE);
+    gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_WRAP_T, gl!.CLAMP_TO_EDGE);
+  }
 
   function setSdf(data: Float32Array | null, width: number, height: number): void {
     if (!sdfTexture) sdfTexture = gl!.createTexture();
@@ -133,9 +182,15 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     system = parsed.system;
     imageNames = parsed.images;
     imageUnitMap = new Map(imageNames.map((name, i) => [name, i + 1]));
+    envelopeNames = parsed.envelopes;
+    const envStart = 1 + imageNames.length;
+    envelopeUnitMap = new Map(envelopeNames.map((name, i) => [name, envStart + i]));
     // Clean up textures for images no longer in the new shader.
     for (const [name, tex] of imageTextures) {
       if (!imageUnitMap.has(name)) { gl!.deleteTexture(tex); imageTextures.delete(name); }
+    }
+    for (const [name, tex] of envelopeTextures) {
+      if (!envelopeUnitMap.has(name)) { gl!.deleteTexture(tex); envelopeTextures.delete(name); envelopeCache.delete(name); }
     }
     uniforms = [];
     const count = gl!.getProgramParameter(prog, gl!.ACTIVE_UNIFORMS) as number;
@@ -180,6 +235,23 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       }
     }
 
+    // Bake & bind envelope textures.
+    for (const [name, unit] of envelopeUnitMap) {
+      const val = values[name];
+      if (Array.isArray(val)) {
+        const key = val.join(',');
+        if (envelopeCache.get(name) !== key) {
+          bakeEnvelope(name, val);
+          envelopeCache.set(name, key);
+        }
+        const tex = envelopeTextures.get(name);
+        if (tex) {
+          gl!.activeTexture(gl!.TEXTURE0 + unit);
+          gl!.bindTexture(gl!.TEXTURE_2D, tex);
+        }
+      }
+    }
+
     for (const u of uniforms) {
       if (!u.location) continue;
       switch (u.name) {
@@ -212,6 +284,13 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
         continue;
       }
 
+      // Envelope curve sampler — bind its texture unit.
+      const envUnit = envelopeUnitMap.get(u.name);
+      if (envUnit !== undefined) {
+        gl!.uniform1i(u.location, envUnit);
+        continue;
+      }
+
       const val = values[u.name];
       if (val === undefined) continue;
       if (u.type === gl!.FLOAT) {
@@ -233,6 +312,9 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     if (sdfTexture) gl!.deleteTexture(sdfTexture);
     for (const tex of imageTextures.values()) gl!.deleteTexture(tex);
     imageTextures.clear();
+    for (const tex of envelopeTextures.values()) gl!.deleteTexture(tex);
+    envelopeTextures.clear();
+    envelopeCache.clear();
     program = null;
     uniforms = [];
     sdfTexture = null;

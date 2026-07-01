@@ -49,6 +49,7 @@ export type Control<S, K extends keyof S = keyof S> = K extends keyof S
         })
       | (ControlBase<S, K> & { kind: 'image' })
       | (ControlBase<S, K> & { kind: 'bezier' })
+      | (ControlBase<S, K> & { kind: 'envelope' })
   : never;
 
 export type SettingsSchema<S> = Control<S>[];

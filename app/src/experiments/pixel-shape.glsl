@@ -33,10 +33,10 @@ uniform float u_falloff;
  * Shapes the falloff curve.
  * @section Falloff
  * @label Curve
- * @bezier
- * @default 0.0, 0.0, 1.0, 1.0
+ * @envelope
+ * @default 0, 0, 1, 1
  */
-uniform vec4 u_falloffCurve;
+uniform sampler2D u_falloffCurve;
 
 /**
  * Smallest cell size when falloff is applied.
@@ -123,20 +123,6 @@ uniform vec3 u_colorB;
  */
 uniform vec3 u_bg;
 
-float cubicBezier(float t, vec4 cp) {
-    float s = t;
-    float x1 = cp.x, y1 = cp.y, x2 = cp.z, y2 = cp.w;
-    for (int i = 0; i < 8; i++) {
-        float inv = 1.0 - s;
-        float xS = 3.0 * inv * inv * s * x1 + 3.0 * inv * s * s * x2 + s * s * s;
-        float dxS = 3.0 * inv * inv * x1 + 6.0 * inv * s * (x2 - x1) + 3.0 * s * s * (1.0 - x2);
-        s -= (xS - t) / max(dxS, 0.001);
-        s = clamp(s, 0.0, 1.0);
-    }
-    float inv = 1.0 - s;
-    return 3.0 * inv * inv * s * y1 + 3.0 * inv * s * s * y2 + s * s * s;
-}
-
 float shapeDist(vec2 p, float shapeType) {
     float m = floor(shapeType + 0.5);
     if (m < 0.5) {
@@ -193,7 +179,7 @@ void main() {
     }
 
     float normDist = clamp(dist / max(u_radius, 0.001), 0.0, 1.0);
-    float curvedDist = cubicBezier(normDist, u_falloffCurve);
+    float curvedDist = texture2D(u_falloffCurve, vec2(normDist, 0.5)).r;
     float falloffT = clamp(curvedDist * u_falloff, 0.0, 1.0);
     float sizeScale = mix(1.0, u_minSize, falloffT);
     float halfSize = (1.0 - u_gap) * 0.5 * sizeScale;
