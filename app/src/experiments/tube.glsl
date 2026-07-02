@@ -257,6 +257,18 @@ uniform float u_rimIntensity;
 
 // SECTION: Light
 /**
+ * How much the rim lines ride the light sweep. Positive concentrates rim
+ * brightness where the hotspot is passing (the rim flares as the light
+ * arrives); 0 keeps the rim even along the whole tube; negative inverts it —
+ * the rim dims under the hotspot and glows in the dark stretches instead.
+ * @label Rim Sweep
+ * @default 0.35
+ * @range -1, 1
+ */
+uniform float u_rimFollow;
+
+// SECTION: Light
+/**
  * How far the rim light reaches inward from the silhouette — thin crisp lines
  * vs broad bands bleeding toward the tube's core.
  * @label Rim Width
@@ -520,7 +532,13 @@ float shadeT(float q, float L, float beta) {
   // bloom near the light), keeping brightness and crispness inversely coupled.
   float dissolve = 1.0 + 2.5 * beta + 1.2 * u_bloomAmt * L;
   float rimP = mix(14.0, 3.5, u_rimWidth) / dissolve;
-  float rim = pow(1.0 - z, rimP) * u_rimIntensity * (0.55 + 0.65 * L) / (1.0 + 1.6 * beta + 0.8 * u_bloomAmt * L);
+  // Rim Sweep: how the rim rides the hotspot. Positive redistributes the rim's
+  // energy toward the lit stretch (dim floor away from it, flare under it);
+  // negative carves the rim away under the hotspot so it glows in the dark
+  // stretches; 0 is a uniform rim.
+  float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
+                 * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
+  float rim = pow(1.0 - z, rimP) * u_rimIntensity * sweepMul / (1.0 + 1.6 * beta + 0.8 * u_bloomAmt * L);
 
   float tTube = body + bloom + rim;
 
