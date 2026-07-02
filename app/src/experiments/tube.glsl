@@ -138,7 +138,7 @@ uniform float u_curveAmt;
  * tighter serpentine waves.
  * @label Curve Scale
  * @default 0.75
- * @range 0.25, 3
+ * @range 0.25, 1.5
  */
 uniform float u_curveScale;
 
