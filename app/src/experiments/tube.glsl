@@ -444,7 +444,7 @@ uniform float u_dispersion;
  * light spills into the background.
  * @label Glow Spill
  * @default 0.5
- * @range 0, 2
+ * @range 0, 1
  */
 uniform float u_glowSpill;
 
