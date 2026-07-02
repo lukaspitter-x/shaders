@@ -304,12 +304,14 @@ uniform float u_rimShadow;
 
 // SECTION: Light
 /**
- * Brightness of the dark rim — 1 rests it on a clearly visible key-tinted
- * shadow level (independent of Body Level); 0 lets it crush to true black
- * under the sweep.
+ * Brightness of the dark rim — 0 lets it crush to true black under the
+ * sweep, 1 rests it on a clearly visible key-tinted shadow level
+ * (independent of Body Level), above 1 it lifts further into a bright
+ * saturated band (it never darkens the tube past its own level, so on a dim
+ * body high values read through the dye instead).
  * @label Shadow Floor
  * @default 1
- * @range 0, 1
+ * @range 0, 2
  */
 uniform float u_shadowFloor;
 
