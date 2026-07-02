@@ -248,7 +248,8 @@ uniform float u_bodyLevel;
 
 // SECTION: Light
 /**
- * Brightness of the rim highlight lines hugging the tube's silhouette.
+ * Base brightness of the rim highlight lines along the whole tube,
+ * independent of the sweep. The sweep-riding flare is Rim Flare.
  * @label Rim Intensity
  * @default 1.2
  * @range 0, 3
@@ -257,10 +258,21 @@ uniform float u_rimIntensity;
 
 // SECTION: Light
 /**
- * How much the rim lines ride the light sweep. Positive concentrates rim
- * brightness where the hotspot is passing (the rim flares as the light
- * arrives); 0 keeps the rim even along the whole tube; negative inverts it —
- * the rim dims under the hotspot and glows in the dark stretches instead.
+ * Brightness of the sweep-riding rim — the flanks that flare before and
+ * after the hotspot (at Rim Lead distance), independent of the base Rim
+ * Intensity. 0 = the rim ignores the sweep entirely.
+ * @label Rim Flare
+ * @default 0.7
+ * @range 0, 3
+ */
+uniform float u_rimFlare;
+
+// SECTION: Light
+/**
+ * How much the BASE rim rides the true hotspot. Positive concentrates the
+ * base rim where the light is; 0 keeps it even along the whole tube;
+ * negative dims it under the hotspot so it glows in the dark stretches.
+ * The flanking flare is separate (Rim Flare + Rim Lead).
  * @label Rim Sweep
  * @default 0.35
  * @range -1, 1
@@ -292,14 +304,25 @@ uniform float u_rimShadow;
 
 // SECTION: Light
 /**
- * Brightness floor of the dark rim — 1 rests it on the key-tinted shadow (a
- * dark sibling of the body, never black); 0 lets it crush to true black
+ * Brightness of the dark rim — 1 rests it on a clearly visible key-tinted
+ * shadow level (independent of Body Level); 0 lets it crush to true black
  * under the sweep.
  * @label Shadow Floor
  * @default 1
  * @range 0, 1
  */
 uniform float u_shadowFloor;
+
+// SECTION: Light
+/**
+ * Saturation of the dark rim — 0 leaves it on the palette's neutral shadow
+ * (dark, hue barely present); 1 dyes it a deep, fully saturated key tone so
+ * the darkened edges stay vividly in the key colour.
+ * @label Shadow Saturation
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_shadowTint;
 
 // SECTION: Light
 /**
@@ -571,13 +594,15 @@ float shadeT(float q, float L, float Lrim, float beta) {
   // energy toward the lit stretch (dim floor away from it, flare under it);
   // negative carves the rim away under the hotspot so it glows in the dark
   // stretches; 0 is a uniform rim.
-  // The rim rides Lrim — the light field sampled ahead of (or behind) the
-  // hotspot by Rim Lead — so it can flare before the sweep arrives. The
-  // bloom-melt in the denominator stays on the true L: the rim dissolves
-  // where the body actually blooms.
-  float sweepMul = mix(1.0, 0.12 + 1.75 * Lrim, max(u_rimFollow, 0.0))
-                 * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * Lrim);
-  float rim = pow(1.0 - z, rimP) * u_rimIntensity * sweepMul / (1.0 + 0.9 * beta + 0.8 * u_bloomAmt * L);
+  // Two independent rim components: the BASE rim (Rim Intensity, optionally
+  // modulated by the true hotspot via Rim Sweep) and the FLARE rim (Rim
+  // Flare) riding Lrim — the flanks before/after the sweep. The bloom-melt
+  // in the denominator stays on the true L: everything dissolves where the
+  // body actually blooms.
+  float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
+                 * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
+  float rimLevel = u_rimIntensity * sweepMul + u_rimFlare * Lrim;
+  float rim = pow(1.0 - z, rimP) * rimLevel / (1.0 + 0.9 * beta + 0.8 * u_bloomAmt * L);
 
   float tTube = body + bloom + rim;
   // Rim Shadow: limb darkening under the hotspot. Where the true light is on
@@ -586,9 +611,10 @@ float shadeT(float q, float L, float Lrim, float beta) {
   // Fresnel coordinate with linear radius so the darkening spreads broadly
   // from the silhouette into the body and reads as shading, not a line.
   float darkMask = pow(clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0), 1.6);
-  // Shadow Floor slides the resting level from key-tinted shadow (1) to true
-  // black (0).
-  float tFloor = (0.05 + 0.4 * body) * u_shadowFloor;
+  // Shadow Floor slides the resting level from a clearly visible key-tinted
+  // shadow (1) to true black (0). Mostly independent of Body Level so the
+  // floor stays visible even on a very dim body.
+  float tFloor = (0.12 + 0.3 * body) * u_shadowFloor;
   tTube = mix(tTube, min(tTube, tFloor), min(u_rimShadow * L * darkMask * 1.4, 1.0));
 
   // The void: near-black key-tinted air + the tube's spilled halo. The halo
@@ -724,6 +750,16 @@ void main() {
   vec3 hsv = rgb2hsv(col);
   hsv.x = fract(hsv.x + 0.06 * (u_hueSpread * litN + u_hueShadow * darkN) + 1.0);
   col = hsv2rgb(hsv);
+
+  // Shadow Saturation: dye the dark rim toward a deep, fully saturated key
+  // tone (the palette's own dark end is low-saturation by design, so a vivid
+  // dark needs its own dye). Uses the center channel's carve mask; brightness
+  // of the dye follows Shadow Floor.
+  float darkMaskM = pow(clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0), 1.6);
+  float wShadow = min(u_rimShadow * L * darkMaskM * 1.4, 1.0) * alpha;
+  vec3 kHsv = rgb2hsv(u_key);
+  vec3 shadowDye = toLinear(hsv2rgb(vec3(kHsv.x, 1.0, mix(0.1, 0.5, u_shadowFloor))));
+  col = mix(col, shadowDye, wShadow * u_shadowTint);
 
   col = toGamma(col);
 
