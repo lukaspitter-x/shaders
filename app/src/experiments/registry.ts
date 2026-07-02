@@ -18,6 +18,7 @@ import softShapeSource from './soft-shape.glsl?raw';
 import pixelShapeSource from './pixel-shape.glsl?raw';
 import staggerGridSource from './stagger-grid.glsl?raw';
 import thermalSource from './thermal.glsl?raw';
+import tubeSource from './tube.glsl?raw';
 
 export interface ShaderExperiment {
   id: string;
@@ -35,4 +36,5 @@ export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'stagger-grid', label: 'Stagger Grid', type: 'fill', source: staggerGridSource },
   { id: 'pixel-shape', label: 'Pixel Shape', type: 'fill', source: pixelShapeSource },
   { id: 'thermal', label: 'Thermal', type: 'fill', source: thermalSource },
+  { id: 'tube', label: 'Tube', type: 'fill', source: tubeSource },
 ];
