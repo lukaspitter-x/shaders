@@ -370,11 +370,12 @@ uniform float u_softness;
 /**
  * Chromatic dispersion — each colour channel sees a slightly different tube
  * radius, so rims and halo fringe warm↔cool like light through real glass.
- * The split grows with defocus (out-of-focus regions fringe more, in-focus
- * stays clean), and every channel is a genuine palette sample — no new hues.
+ * The split rides the focus blur exclusively: in-focus areas stay perfectly
+ * clean and the fringe grows with defocus (needs Softness > 0 to appear).
+ * Every channel is a genuine palette sample — no new hues.
  * @label Dispersion
  * @default 0.3
- * @range 0, 1
+ * @range 0, 2
  */
 uniform float u_dispersion;
 
@@ -530,7 +531,7 @@ float shadeT(float q, float L, float beta) {
   // exponent and dims the peak — crisp thin lines in focus, dissolving bands
   // out of focus. The hotspot ALSO widens/dims them (rims melt into the body
   // bloom near the light), keeping brightness and crispness inversely coupled.
-  float dissolve = 1.0 + 2.5 * beta + 1.2 * u_bloomAmt * L;
+  float dissolve = 1.0 + 1.2 * beta + 1.2 * u_bloomAmt * L;
   float rimP = mix(14.0, 3.5, u_rimWidth) / dissolve;
   // Rim Sweep: how the rim rides the hotspot. Positive redistributes the rim's
   // energy toward the lit stretch (dim floor away from it, flare under it);
@@ -538,7 +539,7 @@ float shadeT(float q, float L, float beta) {
   // stretches; 0 is a uniform rim.
   float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
                  * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
-  float rim = pow(1.0 - z, rimP) * u_rimIntensity * sweepMul / (1.0 + 1.6 * beta + 0.8 * u_bloomAmt * L);
+  float rim = pow(1.0 - z, rimP) * u_rimIntensity * sweepMul / (1.0 + 0.9 * beta + 0.8 * u_bloomAmt * L);
 
   float tTube = body + bloom + rim;
 
@@ -558,10 +559,34 @@ float shadeT(float q, float L, float beta) {
   // out of focus it spreads both ways so the silhouette genuinely loses its
   // line, not just its rim light.
   float px = 1.0 / (max(u_thickness, 0.02) * 0.5 * u_resolution.y);
-  float bw = 1.5 * px + 0.9 * beta;
+  float bw = 1.5 * px + 0.45 * beta;
   float alpha = 1.0 - smoothstep(1.0 - bw * 0.4, 1.0 + bw, aq);
 
   return mix(tVoid, tTube, alpha);
+}
+
+// True progressive defocus: convolve the analytic tube field across q with a
+// gaussian whose radius grows with the local blur amount — a genuine blur of
+// the image (rims, body and silhouette all smear together), not just wider
+// edges. The taps ride on shadeT's procedurally softened base, so the 5-tap
+// kernel stays band-free even at large radii. In-focus (rad→0) collapses to a
+// single sample.
+float blurShadeT(float q, float L, float beta) {
+  float rad = 1.2 * beta;
+  if (rad < 1.0e-3) return shadeT(q, L, beta);
+  const int TAPS = 9;
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int i = 0; i < TAPS; i++) {
+    float o = float(i) - 4.0;
+    // Per-tap pixel jitter breaks the discrete kernel into fine grain (the
+    // dither already sets that texture) instead of visible ghost edges.
+    float jj = (hash21(gl_FragCoord.xy + vec2(float(i) * 17.13, 7.7)) - 0.5) * 0.5;
+    float gw = exp(-o * o * 0.15);
+    sum += shadeT(q + (o + jj) * 0.25 * rad, L, beta) * gw;
+    wsum += gw;
+  }
+  return sum / wsum;
 }
 
 void main() {
@@ -605,17 +630,18 @@ void main() {
   float dw = (fract((nx - xh) / P + 0.5) - 0.5) * P;
   float L = exp(-dw * dw / (2.0 * sigma * sigma));
 
-  // --- Dispersion: per-channel tube radius, defocus-coupled ---
+  // --- Dispersion: per-channel tube radius, defocus-gated ---
   // Each channel shades the tube at a slightly scaled q — blue sees a fatter
   // tube, red a thinner one — so the rim lines and halo edge fringe warm on
-  // the inside, cool on the outside, like longitudinal CA in a fast lens. The
-  // split grows with beta so in-focus regions stay clean and the out-of-focus
-  // smear breaks into colour, which is where real glass fringes too.
-  float dsp = u_dispersion * (0.4 + 1.4 * beta) * 0.05;
+  // the inside, cool on the outside, like longitudinal CA in a fast lens.
+  // The split is proportional to beta ONLY: in-focus pixels get exactly zero
+  // split (no double edge on the sharp silhouette) and the fringe lives
+  // purely in the out-of-focus smear, which is where real glass fringes too.
+  float dsp = u_dispersion * beta * 0.09;
   vec3 tRGB = vec3(
-    shadeT(q * (1.0 + dsp), L, beta),
-    shadeT(q, L, beta),
-    shadeT(q * (1.0 - dsp), L, beta)
+    blurShadeT(q * (1.0 + dsp), L, beta),
+    blurShadeT(q, L, beta),
+    blurShadeT(q * (1.0 - dsp), L, beta)
   );
 
   // --- Shade all channels through the ONE palette ---
