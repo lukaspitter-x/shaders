@@ -2,7 +2,9 @@
  * Tube — a thick, soft 3D tube crossing the viewport edge-to-edge on a dark
  * void, lit by a hotspot that sweeps along its length. The centerline is a
  * wave: `Pos Y + Tilt·x + two sine harmonics`, so the path is always smooth,
- * always crosses the full width, and flexes organically when animated.
+ * always crosses the full width, and flexes organically when animated. The
+ * primary harmonic can be waveshaped — leaned sideways and flattened toward
+ * plateaus — for bend styles beyond a pure sine.
  *
  * Lighting model (from the reference): the tube "breathes" between a dim state
  * (deep saturated body, thin crisp rim lines hugging the silhouette) and a
@@ -10,16 +12,20 @@
  * dissolve into the glow). One periodic hotspot travels along the tube's
  * length per loop; its proximity drives BOTH the local body bloom and the rim
  * dissolve, so brightness and rim-crispness stay inversely coupled like real
- * light. Path flex, sweep and bloom are all phase-locked to one master loop —
- * seamless at any duration.
+ * light. Path motion (flex, travel, sway), sweep and bloom are all phase-
+ * locked to one master loop — seamless at any duration.
  *
  * Camera focus: a movable radial focus field. Inside its radius the tube is
  * sharp; with distance from the focus center everything defocuses — silhouette
- * spreads, rim lines widen and dim — up to the Softness amount.
+ * spreads, rim lines widen and dim — up to the Softness amount. Dispersion
+ * rides on it: each colour channel sees a slightly different tube radius, and
+ * the split grows with defocus, so rims and halo fringe warm↔cool exactly
+ * where a real lens would.
  *
  * Unified palette: identical contract to Thermal. Every pixel computes an
  * illumination level and samples ONE ramp born from the Key Color, so body,
- * rims, halo and background are hue-matched siblings by construction.
+ * rims, halo and background are hue-matched siblings by construction — the
+ * dispersion channels are genuine palette samples too, never invented hues.
  *
  * Technique: 2.5D analytic cylinder. For a pixel at normalized distance q from
  * the centerline (slope-corrected so thickness holds on tilted sections),
@@ -135,6 +141,26 @@ uniform float u_curvePhase;
 
 // SECTION: Tube
 /**
+ * Leans the bends sideways — crests sweep left or right like a wave about to
+ * break, instead of rising and falling symmetrically.
+ * @label Curve Lean
+ * @default 0
+ * @range -1, 1
+ */
+uniform float u_curveLean;
+
+// SECTION: Tube
+/**
+ * Shape of the bends — 0 is a pure sine; higher flattens the crests toward
+ * plateaus with tighter turns between them, for a more architectural path.
+ * @label Curve Sharpness
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_curveSharp;
+
+// SECTION: Tube
+/**
  * Second wave harmonic — adds an asymmetric, more organic wobble on top of the
  * main curve. 0 = a clean single wave.
  * @label Curve Detail
@@ -143,10 +169,20 @@ uniform float u_curvePhase;
  */
 uniform float u_curveDetail;
 
+// SECTION: Tube
+/**
+ * Frequency of the detail wobble relative to the main curve — low keeps it a
+ * broad secondary swell, high makes it a fine ripple riding the big bends.
+ * @label Detail Scale
+ * @default 2.3
+ * @range 1.2, 4
+ */
+uniform float u_detailScale;
+
 // SECTION: Light
 /**
  * Seconds for one full cycle — the light sweeping once along the tube, the
- * body breathing dim→bloom→dim, and the path flexing — all phase-locked.
+ * body breathing dim→bloom→dim, and the path moving — all phase-locked.
  * The loop is seamless at any value.
  * @label Loop Duration
  * @default 10
@@ -167,9 +203,9 @@ uniform float u_sweepWidth;
 
 // SECTION: Light
 /**
- * Phase-shifts the light sweep relative to the path flex, as a fraction of the
- * loop — decides where along the arc the hotspot sits when the curve is mid-
- * flex, without breaking the seamless loop.
+ * Phase-shifts the light sweep relative to the path motion, as a fraction of
+ * the loop — decides where along the arc the hotspot sits when the curve is
+ * mid-flex, without breaking the seamless loop.
  * @label Light Offset
  * @default 0
  * @range -0.5, 0.5
@@ -215,6 +251,46 @@ uniform float u_rimIntensity;
  * @range 0.05, 1
  */
 uniform float u_rimWidth;
+
+// SECTION: Motion
+/**
+ * Master motion — scales all path movement (flex, travel, sway) together.
+ * 0 freezes the path completely; the light keeps sweeping.
+ * @label Motion Amount
+ * @default 1
+ * @range 0, 1.5
+ */
+uniform float u_motion;
+
+// SECTION: Motion
+/**
+ * In-place flex — the bends lean and recover where they stand, like the
+ * reference. The wave shape breathes without going anywhere.
+ * @label Flex Amount
+ * @default 0.3
+ * @range 0, 1
+ */
+uniform float u_flexAmt;
+
+// SECTION: Motion
+/**
+ * Traveling wave — slides the wave pattern along the tube so the bends
+ * migrate across the frame, one wavelength per loop (always seamless).
+ * @label Travel
+ * @default 0.15
+ * @range 0, 1
+ */
+uniform float u_travel;
+
+// SECTION: Motion
+/**
+ * Whole-tube bob — the entire path drifts up and down once per loop, on top
+ * of whatever the bends themselves are doing.
+ * @label Sway
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_sway;
 
 // SECTION: Focus
 /**
@@ -265,15 +341,17 @@ uniform float u_focusFalloff;
  */
 uniform float u_softness;
 
-// SECTION: Atmosphere
+// SECTION: Focus
 /**
- * How much the path undulates over the loop — the S-curve flexing its bends.
- * 0 freezes the path; the light keeps sweeping.
- * @label Flex Amount
+ * Chromatic dispersion — each colour channel sees a slightly different tube
+ * radius, so rims and halo fringe warm↔cool like light through real glass.
+ * The split grows with defocus (out-of-focus regions fringe more, in-focus
+ * stays clean), and every channel is a genuine palette sample — no new hues.
+ * @label Dispersion
  * @default 0.3
  * @range 0, 1
  */
-uniform float u_flexAmt;
+uniform float u_dispersion;
 
 // SECTION: Atmosphere
 /**
@@ -338,6 +416,20 @@ vec3 palette(float t, vec3 keyLin) {
   return mix(hi, peak, smoothstep(1.0, 1.2, t));
 }
 
+// Shade a per-channel illumination triple through the ONE palette. Each channel
+// is a genuine palette sample, so the only way colours separate is Dispersion
+// feeding slightly different levels per channel (a spatial offset upstream).
+// On sharp features (the rim) that separation fringes into the key's analogous
+// neighbours — violet inside, cyan outside for a blue key — the same pairing
+// real longitudinal CA produces, so it reads as lens glass, not rainbow.
+vec3 shadeRGB(vec3 t, vec3 keyLin) {
+  return vec3(
+    palette(t.x, keyLin).r,
+    palette(t.y, keyLin).g,
+    palette(t.z, keyLin).b
+  );
+}
+
 // Soft highlight ceiling: near-linear below `ceil`, smoothly saturating toward
 // it so no tone blows out to white.
 float softClip(float t, float ceil) {
@@ -345,22 +437,96 @@ float softClip(float t, float ceil) {
   return ceil * x / pow(1.0 + x * x * x, 1.0 / 3.0);
 }
 
+// Waveshaped sine and its d/dθ: `lean` skews the crests sideways (a wave about
+// to break), `sharp` flattens them toward plateaus. lean=sharp=0 collapses to
+// plain (sin, cos).
+vec2 shapedSin(float th, float lean, float sharp) {
+  float t2 = th - lean * sin(th);
+  float dt2 = 1.0 - lean * cos(th);
+  float s = sin(t2);
+  float den = 1.0 + sharp * abs(s);
+  float v = s * (1.0 + sharp) / den;
+  float dv = cos(t2) * (1.0 + sharp) / (den * den) * dt2;
+  return vec2(v, dv);
+}
+
 // The tube's centerline y (in p-units, full height == 1) at horizontal nx in
 // [-1,1], plus its analytic slope for thickness correction. `flex` is the
-// loop phase in radians (integer cycles per loop → seamless).
+// loop phase in radians (integer cycles per loop → seamless). Motion is a mix
+// of a standing flex (phases wobble in counter-motion, bends lean in place)
+// and a traveling wave (phase advances one full cycle per loop, bends migrate)
+// — each seamless on its own, so any blend of them is too.
 vec2 centerline(float nx, float flex) {
   float w1 = 3.1415927 * u_curveScale;
-  // Incommensurate second harmonic so the wobble never mirrors the main wave.
-  float w2 = 2.3 * w1;
+  float w2 = u_detailScale * w1;
   float a1 = u_curveAmt * 0.35;
   float a2 = u_curveDetail * a1 * 0.6;
-  // Flex animates the harmonics' phases in counter-motion (not a travelling
-  // wave), so the bends lean and recover in place like the reference.
-  float ph1 = u_curvePhase * 3.1415927 + u_flexAmt * 0.8 * sin(flex);
-  float ph2 = 1.7 - u_flexAmt * 1.1 * sin(flex + 1.3);
-  float y = u_posY * 0.5 + u_tilt * 0.35 * nx + a1 * sin(w1 * nx + ph1) + a2 * sin(w2 * nx + ph2);
-  float dy = u_tilt * 0.35 + a1 * w1 * cos(w1 * nx + ph1) + a2 * w2 * cos(w2 * nx + ph2);
+  float lean = u_curveLean * 0.8;
+  float sharp = u_curveSharp * 3.0;
+  float m = u_motion;
+  float phBase = u_curvePhase * 3.1415927;
+  // Blend factor toward the traveling wave. Time-constant, so seamlessness is
+  // preserved; scaled by the master so Motion 0 truly freezes the path.
+  float mixT = clamp(u_travel * m, 0.0, 1.0);
+
+  vec2 h1s = shapedSin(w1 * nx + phBase + m * u_flexAmt * 0.8 * sin(flex), lean, sharp);
+  vec2 h1t = shapedSin(w1 * nx + phBase - flex, lean, sharp);
+  vec2 h1 = mix(h1s, h1t, mixT);
+
+  float th2s = w2 * nx + 1.7 - m * u_flexAmt * 1.1 * sin(flex + 1.3);
+  float th2t = w2 * nx + 1.7 - flex;
+  vec2 h2 = mix(vec2(sin(th2s), cos(th2s)), vec2(sin(th2t), cos(th2t)), mixT);
+
+  float sway = m * u_sway * 0.12 * sin(flex);
+  float y = u_posY * 0.5 + u_tilt * 0.35 * nx + a1 * h1.x + a2 * h2.x + sway;
+  float dy = u_tilt * 0.35 + a1 * w1 * h1.y + a2 * w2 * h2.y;
   return vec2(y, dy);
+}
+
+// Full illumination level for one colour channel at normalized tube distance q:
+// cylinder body + bloom + rim inside, spilled halo outside, blended across the
+// defocus-widened silhouette and soft-clipped to the highlight ceiling.
+// Dispersion calls this three times with slightly different q per channel.
+float shadeT(float q, float L, float beta) {
+  float aq = abs(q);
+  float z = sqrt(max(1.0 - q * q, 0.0));
+
+  // Body: a dim cylinder-shaded floor plus the local bloom where the hotspot
+  // passes. Bloom pushes toward (and past) the palette's highlight band; the
+  // Highlight Ceiling soft-clips it so it never hard-blows to white.
+  float body = u_bodyLevel * (0.30 + 0.45 * z);
+  float bloom = u_bloomAmt * L * (0.55 + 0.45 * z);
+
+  // Rims: Fresnel lines at the silhouette. Defocus (beta) widens the falloff
+  // exponent and dims the peak — crisp thin lines in focus, dissolving bands
+  // out of focus. The hotspot ALSO widens/dims them (rims melt into the body
+  // bloom near the light), keeping brightness and crispness inversely coupled.
+  float dissolve = 1.0 + 2.5 * beta + 1.2 * u_bloomAmt * L;
+  float rimP = mix(14.0, 3.5, u_rimWidth) / dissolve;
+  float rim = pow(1.0 - z, rimP) * u_rimIntensity * (0.55 + 0.65 * L) / (1.0 + 1.6 * beta + 0.8 * u_bloomAmt * L);
+
+  float tTube = body + bloom + rim;
+
+  // The void: near-black key-tinted air + the tube's spilled halo. The halo
+  // hugs the silhouette (crisp when in focus) and reaches farther, softer,
+  // with defocus — the out-of-focus tube smears into the dark.
+  float haloReach = 0.10 + 0.35 * u_glowSpill + 0.45 * beta;
+  float halo = exp(-max(aq - 1.0, 0.0) / max(haloReach, 1.0e-3));
+  float tVoid = u_voidLift * 0.10 + halo * (0.25 + 0.75 * L) * u_glowSpill * (0.35 + 0.4 * u_bodyLevel + 0.5 * u_bloomAmt);
+
+  // Highlight ceiling: soft-limit every tone so nothing blows out to white.
+  float tCeil = mix(0.6, 1.2, u_highlightCap);
+  tTube = softClip(tTube, tCeil);
+  tVoid = softClip(tVoid, tCeil);
+
+  // Silhouette mask, defocus-widened. In focus the edge is a couple of pixels;
+  // out of focus it spreads both ways so the silhouette genuinely loses its
+  // line, not just its rim light.
+  float px = 1.0 / (max(u_thickness, 0.02) * 0.5 * u_resolution.y);
+  float bw = 1.5 * px + 0.9 * beta;
+  float alpha = 1.0 - smoothstep(1.0 - bw * 0.4, 1.0 + bw, aq);
+
+  return mix(tVoid, tTube, alpha);
 }
 
 void main() {
@@ -374,7 +540,7 @@ void main() {
   // the tube's length parameter.
   float nx = 2.0 * uv.x - 1.0;
 
-  // --- Master loop: one phase drives flex, sweep and breathing ---
+  // --- Master loop: one phase drives path motion, sweep and breathing ---
   float phase = fract(u_time / max(u_loopDur, 0.1));
   float flex = phase * 6.2831853;
 
@@ -385,10 +551,6 @@ void main() {
   float slopeP = cl.y * 2.0 / aspect;
   float halfT = max(u_thickness, 0.02) * 0.5;
   float q = (p.y - cl.x) / sqrt(1.0 + slopeP * slopeP) / halfT;
-  float aq = abs(q);
-
-  // Fake cylinder normal: z is 1 on the tube's spine, 0 at the silhouette.
-  float z = sqrt(max(1.0 - q * q, 0.0));
 
   // --- Camera focus: radial blur field ---
   // Sharp inside the focus radius, easing to full Softness across the falloff
@@ -408,50 +570,33 @@ void main() {
   float dw = (fract((nx - xh) / P + 0.5) - 0.5) * P;
   float L = exp(-dw * dw / (2.0 * sigma * sigma));
 
-  // --- Tube illumination ---
-  // Body: a dim cylinder-shaded floor plus the local bloom where the hotspot
-  // passes. Bloom pushes toward (and past) the palette's highlight band; the
-  // Highlight Ceiling soft-clips it so it never hard-blows to white.
-  float body = u_bodyLevel * (0.30 + 0.45 * z);
-  float bloom = u_bloomAmt * L * (0.55 + 0.45 * z);
+  // --- Dispersion: per-channel tube radius, defocus-coupled ---
+  // Each channel shades the tube at a slightly scaled q — blue sees a fatter
+  // tube, red a thinner one — so the rim lines and halo edge fringe warm on
+  // the inside, cool on the outside, like longitudinal CA in a fast lens. The
+  // split grows with beta so in-focus regions stay clean and the out-of-focus
+  // smear breaks into colour, which is where real glass fringes too.
+  float dsp = u_dispersion * (0.4 + 1.4 * beta) * 0.05;
+  vec3 tRGB = vec3(
+    shadeT(q * (1.0 + dsp), L, beta),
+    shadeT(q, L, beta),
+    shadeT(q * (1.0 - dsp), L, beta)
+  );
 
-  // Rims: Fresnel lines at the silhouette. Defocus (beta) widens the falloff
-  // exponent and dims the peak — crisp thin lines in focus, dissolving bands
-  // out of focus. The hotspot ALSO widens/dims them (rims melt into the body
-  // bloom near the light), keeping brightness and crispness inversely coupled.
-  float dissolve = 1.0 + 2.5 * beta + 1.2 * u_bloomAmt * L;
-  float rimP = mix(14.0, 3.5, u_rimWidth) / dissolve;
-  float rim = pow(1.0 - z, rimP) * u_rimIntensity * (0.55 + 0.65 * L) / (1.0 + 1.6 * beta + 0.8 * u_bloomAmt * L);
+  // --- Shade all channels through the ONE palette ---
+  vec3 keyLin = toLinear(u_key);
+  vec3 col = shadeRGB(tRGB, keyLin);
 
-  float tTube = body + bloom + rim;
-
-  // --- The void: near-black key-tinted air + the tube's spilled halo ---
-  // The halo hugs the silhouette (crisp when in focus) and reaches farther,
-  // softer, with defocus — the out-of-focus tube smears into the dark.
+  // Hue Spread: subtle analogous drift, warmer toward the hotspot and the lit
+  // core — applied to tube and void alike so they stay hue-matched. Uses the
+  // center (green) channel's geometry.
+  float aq = abs(q);
+  float z = sqrt(max(1.0 - q * q, 0.0));
   float haloReach = 0.10 + 0.35 * u_glowSpill + 0.45 * beta;
   float halo = exp(-max(aq - 1.0, 0.0) / max(haloReach, 1.0e-3));
-  float tVoid = u_voidLift * 0.10 + halo * (0.25 + 0.75 * L) * u_glowSpill * (0.35 + 0.4 * u_bodyLevel + 0.5 * u_bloomAmt);
-
-  // Highlight ceiling: soft-limit every tone so nothing blows out to white.
-  float tCeil = mix(0.6, 1.2, u_highlightCap);
-  tTube = softClip(tTube, tCeil);
-  tVoid = softClip(tVoid, tCeil);
-
-  // --- Silhouette mask, defocus-widened ---
-  // In focus the edge is a couple of pixels; out of focus it spreads both ways
-  // so the silhouette genuinely loses its line, not just its rim light.
   float px = 1.0 / (halfT * u_resolution.y);
   float bw = 1.5 * px + 0.9 * beta;
   float alpha = 1.0 - smoothstep(1.0 - bw * 0.4, 1.0 + bw, aq);
-
-  float t = mix(tVoid, tTube, alpha);
-
-  // --- Shade through the ONE palette ---
-  vec3 keyLin = toLinear(u_key);
-  vec3 col = palette(t, keyLin);
-
-  // Hue Spread: subtle analogous drift, warmer toward the hotspot and the lit
-  // core — applied to tube and void alike so they stay hue-matched.
   float lit = alpha * (0.5 * L + 0.3 * z) + (1.0 - alpha) * 0.3 * halo * L;
   vec3 hsv = rgb2hsv(col);
   hsv.x = fract(hsv.x + u_hueSpread * 0.05 * (lit - 0.35));
