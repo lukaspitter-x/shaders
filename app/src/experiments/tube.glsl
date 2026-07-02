@@ -780,14 +780,16 @@ void main() {
   hsv.x = fract(hsv.x + 0.06 * (u_hueSpread * litN + u_hueShadow * darkN) + 1.0);
   col = hsv2rgb(hsv);
 
-  // Shadow Saturation: dye the dark rim toward a deep, fully saturated key
-  // tone (the palette's own dark end is low-saturation by design, so a vivid
-  // dark needs its own dye). Uses the center channel's carve mask; brightness
-  // of the dye follows Shadow Floor.
+  // Shadow Saturation: dye the dark rim toward a deep, saturated key tone
+  // (the palette's own dark end is low-saturation by design, so a vivid dark
+  // needs its own dye). The dye's saturation follows the KEY's saturation
+  // (sqrt-boosted) — a neutral key gets a neutral dye, never an invented hue
+  // (HSV's "no hue" is numerically red). Uses the center channel's carve
+  // mask; brightness of the dye follows Shadow Floor.
   float dmM = clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0);
   float wShadow = min(u_rimShadow * L * dmM * sqrt(dmM) * 1.4, 1.0) * alpha;
   vec3 kHsv = rgb2hsv(u_key);
-  vec3 shadowDye = toLinear(hsv2rgb(vec3(kHsv.x, 1.0, mix(0.1, 0.5, u_shadowFloor))));
+  vec3 shadowDye = toLinear(hsv2rgb(vec3(kHsv.x, sqrt(kHsv.y), mix(0.1, 0.5, u_shadowFloor))));
   col = mix(col, shadowDye, wShadow * u_shadowTint);
 
   col = toGamma(col);
