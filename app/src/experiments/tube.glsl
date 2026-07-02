@@ -269,13 +269,12 @@ uniform float u_rimFollow;
 
 // SECTION: Light
 /**
- * Shifts the rim's response along the tube relative to the sweep. Positive
- * makes the rim flare BEFORE the hotspot arrives (grazing light announcing
- * the sweep, like the reference); negative makes it trail behind. 0 keeps
- * rim and sweep locked together.
+ * Distance of the bright rim's flanks from the hotspot. The rim flares BOTH
+ * before and after the sweep — announcing it and trailing it — handing off
+ * to the dark rim directly under the light. 0 locks rim and sweep together.
  * @label Rim Lead
  * @default 0.2
- * @range -1, 1
+ * @range 0, 1
  */
 uniform float u_rimLead;
 
@@ -290,6 +289,17 @@ uniform float u_rimLead;
  * @range 0, 1
  */
 uniform float u_rimShadow;
+
+// SECTION: Light
+/**
+ * Brightness floor of the dark rim — 1 rests it on the key-tinted shadow (a
+ * dark sibling of the body, never black); 0 lets it crush to true black
+ * under the sweep.
+ * @label Shadow Floor
+ * @default 1
+ * @range 0, 1
+ */
+uniform float u_shadowFloor;
 
 // SECTION: Light
 /**
@@ -571,10 +581,15 @@ float shadeT(float q, float L, float Lrim, float beta) {
 
   float tTube = body + bloom + rim;
   // Rim Shadow: limb darkening under the hotspot. Where the true light is on
-  // top, the silhouette edges are carved BELOW the body level — the frontal-
-  // light state: bright middle, dark edges. Broad edge mask so the darkening
-  // reads as shading, not a line.
-  tTube *= 1.0 - min(u_rimShadow * L * pow(1.0 - z, 3.0) * 1.2, 0.95);
+  // top, the edges are pulled toward a key-tinted shadow floor (a dark sibling
+  // of the body on the same palette — never black). The mask blends the
+  // Fresnel coordinate with linear radius so the darkening spreads broadly
+  // from the silhouette into the body and reads as shading, not a line.
+  float darkMask = pow(clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0), 1.6);
+  // Shadow Floor slides the resting level from key-tinted shadow (1) to true
+  // black (0).
+  float tFloor = (0.05 + 0.4 * body) * u_shadowFloor;
+  tTube = mix(tTube, min(tTube, tFloor), min(u_rimShadow * L * darkMask * 1.4, 1.0));
 
   // The void: near-black key-tinted air + the tube's spilled halo. The halo
   // hugs the silhouette (crisp when in focus) and reaches farther, softer,
@@ -662,11 +677,16 @@ void main() {
   float xh = (fract(phase + u_lightOffset) - 0.5) * P;
   float dw = (fract((nx - xh) / P + 0.5) - 0.5) * P;
   float L = exp(-dw * dw / (2.0 * sigma * sigma));
-  // The rim's copy of the light field, sampled ahead of the hotspot by Rim
-  // Lead (in tube-length units) — the rim sees the light arrive early (or
-  // late), while the body bloom stays on the true hotspot.
-  float dwR = (fract((nx - u_rimLead - xh) / P + 0.5) - 0.5) * P;
-  float Lrim = exp(-dwR * dwR / (2.0 * sigma * sigma));
+  // The rim's copy of the light field: two flanks at ±Rim Lead around the
+  // hotspot (max of the two, so the peak never doubles). The rim flares
+  // before AND after the sweep while the body bloom and dark rim stay on the
+  // true hotspot between them.
+  float dwA = (fract((nx - u_rimLead - xh) / P + 0.5) - 0.5) * P;
+  float dwB = (fract((nx + u_rimLead - xh) / P + 0.5) - 0.5) * P;
+  float Lrim = max(
+    exp(-dwA * dwA / (2.0 * sigma * sigma)),
+    exp(-dwB * dwB / (2.0 * sigma * sigma))
+  );
 
   // --- Dispersion: per-channel tube radius, defocus-gated ---
   // Each channel shades the tube at a slightly scaled q — blue sees a fatter
