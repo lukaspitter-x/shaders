@@ -263,7 +263,7 @@ uniform float u_rimIntensity;
  * Intensity. 0 = the rim ignores the sweep entirely.
  * @label Rim Flare
  * @default 0.7
- * @range 0, 3
+ * @range 0, 8
  */
 uniform float u_rimFlare;
 
