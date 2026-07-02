@@ -418,10 +418,11 @@ uniform float u_focusFalloff;
 // SECTION: Focus
 /**
  * Maximum defocus outside the focus zone — how dreamy the out-of-focus tube
- * gets: silhouette spreads, rim lines widen and dim. 0 disables the effect.
+ * gets: silhouette spreads, rim lines widen and dim. 0 disables the effect;
+ * above 1 the blur keeps growing toward a full melt.
  * @label Softness
  * @default 0.65
- * @range 0, 1
+ * @range 0, 2
  */
 uniform float u_softness;
 
@@ -576,7 +577,11 @@ vec2 centerline(float nx, float flex) {
 // cylinder body + bloom + rim inside, spilled halo outside, blended across the
 // defocus-widened silhouette and soft-clipped to the highlight ceiling.
 // Dispersion calls this three times with slightly different q per channel.
-float shadeT(float q, float L, float Lrim, float beta) {
+// `foot` is the blur kernel's tap spacing (0 for a direct sample): the sharp
+// features widen by it, so every tap represents its whole kernel segment
+// instead of a point — analytic AA that starves the jitter of steep gradients
+// to turn into grain.
+float shadeT(float q, float L, float Lrim, float beta, float foot) {
   float aq = abs(q);
   float z = sqrt(max(1.0 - q * q, 0.0));
 
@@ -586,25 +591,34 @@ float shadeT(float q, float L, float Lrim, float beta) {
   float body = u_bodyLevel * (0.30 + 0.45 * z);
   float bloom = u_bloomAmt * L * (0.55 + 0.45 * z);
 
-  // Rims: Fresnel lines at the silhouette. Defocus (beta) widens the falloff
-  // exponent and dims the peak — crisp thin lines in focus, dissolving bands
-  // out of focus. The hotspot ALSO widens/dims them (rims melt into the body
-  // bloom near the light), keeping brightness and crispness inversely coupled.
-  float dissolve = 1.0 + 1.2 * beta + 1.2 * u_bloomAmt * L;
-  float rimP = mix(14.0, 3.5, u_rimWidth) / dissolve;
-  // Rim Sweep: how the rim rides the hotspot. Positive redistributes the rim's
-  // energy toward the lit stretch (dim floor away from it, flare under it);
-  // negative carves the rim away under the hotspot so it glows in the dark
-  // stretches; 0 is a uniform rim.
-  // Two independent rim components: the BASE rim (Rim Intensity, optionally
-  // modulated by the true hotspot via Rim Sweep) and the FLARE rim (Rim
-  // Flare) riding Lrim — the flanks before/after the sweep. The bloom-melt
-  // in the denominator stays on the true L: everything dissolves where the
-  // body actually blooms.
+  // Rims: Fresnel lines at the silhouette. Two independent components: the
+  // BASE rim (Rim Intensity, modulated by the true hotspot via Rim Sweep) and
+  // the FLARE rim (Rim Flare) riding Lrim — the flanks before/after the
+  // sweep. The bloom-melt stays on the true L: rims dissolve where the body
+  // actually blooms.
   float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
                  * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
   float rimLevel = u_rimIntensity * sweepMul + u_rimFlare * Lrim;
-  float rim = pow(1.0 - z, rimP) * rimLevel / (1.0 + 0.9 * beta + 0.8 * u_bloomAmt * L);
+  float melt = 1.0 + 1.2 * u_bloomAmt * L;
+  float rimP = mix(14.0, 3.5, u_rimWidth) / melt;
+  // The rim's defocus is ANALYTIC: its lobe lives in z, whose sqrt collapse
+  // at the silhouette makes it far thinner in q than any affordable tap
+  // spacing — so instead of sampling it, crossfade the sharp pow lobe into
+  // the exact blurred result: a gaussian ridge at the silhouette whose sigma
+  // combines the lobe's intrinsic width with the kernel sigma, peak scaled to
+  // conserve energy. The taps then only ever see smooth functions.
+  float zHalf = 1.0 - pow(0.5, 1.0 / rimP);
+  float w0 = max(0.5 * zHalf * zHalf, 1.0e-3);   // intrinsic lobe width in q
+  float sigB = 0.55 * beta;                       // blur sigma in q
+  float sigE = sqrt(w0 * w0 + sigB * sigB);
+  float dq1 = aq - 1.0;
+  // sqrt of the energy-conserving peak ratio: physically the peak would drop
+  // by w0/sigE, but fully honouring that makes blurred rims vanish — halfway
+  // (in log space) keeps the defocused glow present like the reference.
+  float ridge = exp(-dq1 * dq1 / (2.0 * sigE * sigE)) * sqrt(w0 / sigE);
+  float xfade = (sigB * sigB) / (sigE * sigE);    // 0 in focus, →1 as blur dominates
+  float rimShape = mix(pow(1.0 - z, rimP), ridge, xfade);
+  float rim = rimShape * rimLevel / (1.0 + 0.8 * u_bloomAmt * L);
 
   float tTube = body + bloom + rim;
   // Rim Shadow: limb darkening under the hotspot. Where the true light is on
@@ -613,8 +627,10 @@ float shadeT(float q, float L, float Lrim, float beta) {
   // Fresnel coordinate with linear radius so the darkening spreads broadly
   // from the silhouette into the body and reads as shading, not a line.
   // x*sqrt(x) ~= pow(x, 1.5): visually equal to the previous 1.6 exponent and
-  // far cheaper inside the blur loop.
-  float dm = clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0);
+  // far cheaper inside the blur loop. The basis leans fully onto the linear
+  // radius as blur grows — (1-z)'s sqrt spike at the silhouette would band
+  // under the taps.
+  float dm = clamp(mix(1.0 - z, aq, clamp(0.5 + 1.5 * beta, 0.0, 1.0)), 0.0, 1.0);
   float darkMask = dm * sqrt(dm);
   // Shadow Floor slides the resting level from a clearly visible key-tinted
   // shadow (1) to true black (0). Mostly independent of Body Level so the
@@ -637,7 +653,7 @@ float shadeT(float q, float L, float Lrim, float beta) {
   // out of focus it spreads both ways so the silhouette genuinely loses its
   // line, not just its rim light.
   float px = 1.0 / (max(u_thickness, 0.02) * 0.5 * u_resolution.y);
-  float bw = 1.5 * px + 0.45 * beta;
+  float bw = 1.5 * px + 0.45 * beta + 0.8 * foot;
   float alpha = 1.0 - smoothstep(1.0 - bw * 0.4, 1.0 + bw, aq);
 
   return mix(tVoid, tTube, alpha);
@@ -646,23 +662,21 @@ float shadeT(float q, float L, float Lrim, float beta) {
 // True progressive defocus: convolve the analytic tube field across q with a
 // gaussian whose radius grows with the local blur amount — a genuine blur of
 // the image (rims, body and silhouette all smear together), not just wider
-// edges. The taps ride on shadeT's procedurally softened base, so the 5-tap
-// kernel stays band-free even at large radii. In-focus (rad→0) collapses to a
-// single sample.
-float blurShadeT(float q, float L, float Lrim, float beta, float jitter) {
+// edges. Each tap's features are pre-widened by the tap spacing (`foot`), so
+// the discrete sum matches the continuous integral with no banding and no
+// jitter — the blur is noise-free by construction. In-focus (rad→0)
+// collapses to a single sample.
+float blurShadeT(float q, float L, float Lrim, float beta) {
   float rad = 1.2 * beta;
-  if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta);
-  const int TAPS = 9;
+  if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta, 0.0);
+  const int TAPS = 13;
+  float foot = 0.1667 * rad;
   float sum = 0.0;
   float wsum = 0.0;
   for (int i = 0; i < TAPS; i++) {
-    float oi = float(i) - 4.0;
-    // One per-pixel jitter phase-shifts the whole kernel by a sub-spacing
-    // amount — same band-breaking as per-tap jitter at a fraction of the
-    // cost. Weights stay on the integer offsets so the unrolled loop folds
-    // them to constants.
-    float gw = exp(-oi * oi * 0.15);
-    sum += shadeT(q + (oi + jitter) * 0.25 * rad, L, Lrim, beta) * gw;
+    float oi = float(i) - 6.0;
+    float gw = exp(-oi * oi * 0.0666);
+    sum += shadeT(q + oi * foot, L, Lrim, beta, foot) * gw;
     wsum += gw;
   }
   return sum / wsum;
@@ -727,18 +741,17 @@ void main() {
   // split (no double edge on the sharp silhouette) and the fringe lives
   // purely in the out-of-focus smear, which is where real glass fringes too.
   float dsp = u_dispersion * beta * 0.09;
-  float jitter = (hash21(gl_FragCoord.xy + vec2(3.7, 9.1)) - 0.5) * 0.5;
   // With no channel split (dispersion off or in focus) all three channels are
   // identical — shade once instead of three times.
   vec3 tRGB;
   if (dsp > 1.0e-4) {
     tRGB = vec3(
-      blurShadeT(q * (1.0 + dsp), L, Lrim, beta, jitter),
-      blurShadeT(q, L, Lrim, beta, jitter),
-      blurShadeT(q * (1.0 - dsp), L, Lrim, beta, jitter)
+      blurShadeT(q * (1.0 + dsp), L, Lrim, beta),
+      blurShadeT(q, L, Lrim, beta),
+      blurShadeT(q * (1.0 - dsp), L, Lrim, beta)
     );
   } else {
-    tRGB = vec3(blurShadeT(q, L, Lrim, beta, jitter));
+    tRGB = vec3(blurShadeT(q, L, Lrim, beta));
   }
   // Highlight ceiling, applied once to the blurred radiance.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
