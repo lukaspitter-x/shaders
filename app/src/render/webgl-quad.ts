@@ -40,7 +40,7 @@ function remapErrorLines(log: string): string {
 }
 
 export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer | null {
-  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
+  const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
   if (!gl) return null;
 
   const vao = gl.createVertexArray();

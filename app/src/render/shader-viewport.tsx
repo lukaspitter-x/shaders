@@ -35,6 +35,8 @@ export function ShaderViewport({
   previewScale?: 'full' | 1 | 2 | 3 | 4;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const displayRef = useRef<HTMLCanvasElement>(null);
+  const displayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const rendererRef = useRef<ShaderRenderer | null>(null);
   const valuesRef = useRef(values);
   const shapeRef = useRef(shape);
@@ -49,21 +51,45 @@ export function ShaderViewport({
   shapeRef.current = shape;
   previewScaleRef.current = previewScale;
 
-  /** Compute the backing resolution, accounting for preview scale override. */
+  /** Compute the backing resolution. In scale mode, render square at full res. */
   const resolveSize = (): { w: number; h: number } => {
-    const scale = previewScaleRef.current;
-    if (scale === 'full') return sizeRef.current;
-    const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const dim = Math.max(1, Math.round(gridN * scale * dpr));
+    if (previewScaleRef.current === 'full') return sizeRef.current;
+    const dim = Math.min(sizeRef.current.w, sizeRef.current.h);
     return { w: dim, h: dim };
+  };
+
+  /** Copy GL canvas → 2D display canvas with high-quality downsampling. */
+  const copyToDisplay = () => {
+    if (previewScaleRef.current === 'full') return;
+    const gl = canvasRef.current;
+    const disp = displayRef.current;
+    if (!gl || !disp) return;
+    if (!displayCtxRef.current) {
+      displayCtxRef.current = disp.getContext('2d');
+    }
+    const ctx = displayCtxRef.current;
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
+    const scale = previewScaleRef.current as number;
+    const backingSize = Math.round(gridN * scale * dpr);
+    if (disp.width !== backingSize || disp.height !== backingSize) {
+      disp.width = backingSize;
+      disp.height = backingSize;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(gl, 0, 0, backingSize, backingSize);
   };
 
   // Draw one frame from the current refs. Cheap; safe to call any time.
   const drawFrame = () => {
     const r = rendererRef.current;
     const { w, h } = resolveSize();
-    if (r && w > 0 && h > 0) r.draw(valuesRef.current, timeRef.current, mouseRef.current, w, h);
+    if (r && w > 0 && h > 0) {
+      r.draw(valuesRef.current, timeRef.current, mouseRef.current, w, h);
+      copyToDisplay();
+    }
   };
 
   // (Re)build the host-shape SDF at the current size and feed it to the renderer.
@@ -178,8 +204,9 @@ export function ShaderViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values]);
 
-  // Redraw when the preview scale changes.
+  // Redraw when the preview scale changes; reset display context on mode switch.
   useEffect(() => {
+    displayCtxRef.current = null;
     drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewScale]);
@@ -214,9 +241,15 @@ export function ShaderViewport({
     <div className={`relative h-full w-full${previewScale !== 'full' ? ' flex items-center justify-center' : ''}`}>
       <canvas
         ref={canvasRef}
-        className={previewScale === 'full' ? 'block h-full w-full' : 'block'}
-        style={previewScale !== 'full' ? { width: scaledCssPx, height: scaledCssPx } : undefined}
+        className={previewScale === 'full' ? 'block h-full w-full' : 'absolute w-0 h-0 overflow-hidden'}
       />
+      {previewScale !== 'full' && (
+        <canvas
+          ref={displayRef}
+          className="block"
+          style={{ width: scaledCssPx, height: scaledCssPx }}
+        />
+      )}
       {error && (
         <div className="absolute inset-0 flex items-center justify-center p-6">
           <pre className="max-w-full overflow-auto whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 p-3 text-[11px] leading-snug text-destructive">
