@@ -51,13 +51,25 @@ uniform vec3 u_key;
 
 // SECTION: Color
 /**
- * Analogous hue drift across the light gradient (warmer where the light is,
- * cooler away). 0 = strict monochrome; higher = juicier.
- * @label Hue Spread
+ * Hue drift of the LIT tones (bloom, hotspot, bright halo) away from the key.
+ * Positive walks toward the key's warm neighbour (violet for a blue key),
+ * negative toward the cool one (cyan). 0 keeps lit tones strictly on-key.
+ * @label Hue Lit
  * @default 0.25
- * @range 0, 1
+ * @range -1, 1
  */
 uniform float u_hueSpread;
+
+// SECTION: Color
+/**
+ * Hue drift of the SHADOW tones (dim body, void glow) — same signed scale as
+ * Hue Lit. Give it the opposite sign for a classic warm-light/cool-shadow
+ * split, or the same sign to push the whole gradient one way.
+ * @label Hue Shadow
+ * @default -0.15
+ * @range -1, 1
+ */
+uniform float u_hueShadow;
 
 // SECTION: Color
 /**
@@ -101,8 +113,9 @@ uniform float u_posY;
 
 // SECTION: Tube
 /**
- * End-to-end slope — tilts the whole tube so it enters low and exits high
- * (or vice versa) while still spanning the full width.
+ * End-to-end slope. Gentle values lean the tube; at full tilt it runs steeper
+ * than corner-to-corner, entering and exiting through the top/bottom edges —
+ * always cropped by the viewport either way.
  * @label Tilt
  * @default 0
  * @range -1, 1
@@ -478,8 +491,12 @@ vec2 centerline(float nx, float flex) {
   vec2 h2 = mix(vec2(sin(th2s), cos(th2s)), vec2(sin(th2t), cos(th2t)), mixT);
 
   float sway = m * u_sway * 0.12 * sin(flex);
-  float y = u_posY * 0.5 + u_tilt * 0.35 * nx + a1 * h1.x + a2 * h2.x + sway;
-  float dy = u_tilt * 0.35 + a1 * w1 * h1.y + a2 * w2 * h2.y;
+  // Tilt slope: near-linear when gentle (old feel preserved), ramping up to
+  // ~1.25 height-per-half-width at full tilt — steeper than corner-to-corner,
+  // so a fully tilted tube crosses the top/bottom edges instead.
+  float tiltSlope = u_tilt * (0.35 + 0.9 * abs(u_tilt));
+  float y = u_posY * 0.5 + tiltSlope * nx + a1 * h1.x + a2 * h2.x + sway;
+  float dy = tiltSlope + a1 * w1 * h1.y + a2 * w2 * h2.y;
   return vec2(y, dy);
 }
 
@@ -587,9 +604,11 @@ void main() {
   vec3 keyLin = toLinear(u_key);
   vec3 col = shadeRGB(tRGB, keyLin);
 
-  // Hue Spread: subtle analogous drift, warmer toward the hotspot and the lit
-  // core — applied to tube and void alike so they stay hue-matched. Uses the
-  // center (green) channel's geometry.
+  // Hue Lit / Hue Shadow: signed analogous drift at each end of the light
+  // gradient. `lit` fades between them around a midtone pivot, so bright and
+  // dark tones can each lean warm or cool independently — applied to tube and
+  // void alike so they stay hue-matched. Uses the center (green) channel's
+  // geometry.
   float aq = abs(q);
   float z = sqrt(max(1.0 - q * q, 0.0));
   float haloReach = 0.10 + 0.35 * u_glowSpill + 0.45 * beta;
@@ -598,8 +617,10 @@ void main() {
   float bw = 1.5 * px + 0.9 * beta;
   float alpha = 1.0 - smoothstep(1.0 - bw * 0.4, 1.0 + bw, aq);
   float lit = alpha * (0.5 * L + 0.3 * z) + (1.0 - alpha) * 0.3 * halo * L;
+  float litN = smoothstep(0.35, 0.85, lit);
+  float darkN = smoothstep(0.35, 0.05, lit);
   vec3 hsv = rgb2hsv(col);
-  hsv.x = fract(hsv.x + u_hueSpread * 0.05 * (lit - 0.35));
+  hsv.x = fract(hsv.x + 0.06 * (u_hueSpread * litN + u_hueShadow * darkN) + 1.0);
   col = hsv2rgb(hsv);
 
   col = toGamma(col);
