@@ -612,7 +612,10 @@ float shadeT(float q, float L, float Lrim, float beta) {
   // of the body on the same palette — never black). The mask blends the
   // Fresnel coordinate with linear radius so the darkening spreads broadly
   // from the silhouette into the body and reads as shading, not a line.
-  float darkMask = pow(clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0), 1.6);
+  // x*sqrt(x) ~= pow(x, 1.5): visually equal to the previous 1.6 exponent and
+  // far cheaper inside the blur loop.
+  float dm = clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0);
+  float darkMask = dm * sqrt(dm);
   // Shadow Floor slides the resting level from a clearly visible key-tinted
   // shadow (1) to true black (0). Mostly independent of Body Level so the
   // floor stays visible even on a very dim body.
@@ -626,10 +629,9 @@ float shadeT(float q, float L, float Lrim, float beta) {
   float halo = exp(-max(aq - 1.0, 0.0) / max(haloReach, 1.0e-3));
   float tVoid = u_voidLift * 0.10 + halo * (0.25 + 0.75 * L) * u_glowSpill * (0.35 + 0.4 * u_bodyLevel + 0.5 * u_bloomAmt);
 
-  // Highlight ceiling: soft-limit every tone so nothing blows out to white.
-  float tCeil = mix(0.6, 1.2, u_highlightCap);
-  tTube = softClip(tTube, tCeil);
-  tVoid = softClip(tVoid, tCeil);
+  // NOTE: the highlight ceiling (softClip) is applied ONCE after the blur
+  // average, in main — clipping averaged radiance is both cheaper (2 pows per
+  // pixel instead of 2 per tap) and closer to how a lens integrates light.
 
   // Silhouette mask, defocus-widened. In focus the edge is a couple of pixels;
   // out of focus it spreads both ways so the silhouette genuinely loses its
@@ -647,19 +649,20 @@ float shadeT(float q, float L, float Lrim, float beta) {
 // edges. The taps ride on shadeT's procedurally softened base, so the 5-tap
 // kernel stays band-free even at large radii. In-focus (rad→0) collapses to a
 // single sample.
-float blurShadeT(float q, float L, float Lrim, float beta) {
+float blurShadeT(float q, float L, float Lrim, float beta, float jitter) {
   float rad = 1.2 * beta;
   if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta);
   const int TAPS = 9;
   float sum = 0.0;
   float wsum = 0.0;
   for (int i = 0; i < TAPS; i++) {
-    float o = float(i) - 4.0;
-    // Per-tap pixel jitter breaks the discrete kernel into fine grain (the
-    // dither already sets that texture) instead of visible ghost edges.
-    float jj = (hash21(gl_FragCoord.xy + vec2(float(i) * 17.13, 7.7)) - 0.5) * 0.5;
-    float gw = exp(-o * o * 0.15);
-    sum += shadeT(q + (o + jj) * 0.25 * rad, L, Lrim, beta) * gw;
+    float oi = float(i) - 4.0;
+    // One per-pixel jitter phase-shifts the whole kernel by a sub-spacing
+    // amount — same band-breaking as per-tap jitter at a fraction of the
+    // cost. Weights stay on the integer offsets so the unrolled loop folds
+    // them to constants.
+    float gw = exp(-oi * oi * 0.15);
+    sum += shadeT(q + (oi + jitter) * 0.25 * rad, L, Lrim, beta) * gw;
     wsum += gw;
   }
   return sum / wsum;
@@ -724,11 +727,22 @@ void main() {
   // split (no double edge on the sharp silhouette) and the fringe lives
   // purely in the out-of-focus smear, which is where real glass fringes too.
   float dsp = u_dispersion * beta * 0.09;
-  vec3 tRGB = vec3(
-    blurShadeT(q * (1.0 + dsp), L, Lrim, beta),
-    blurShadeT(q, L, Lrim, beta),
-    blurShadeT(q * (1.0 - dsp), L, Lrim, beta)
-  );
+  float jitter = (hash21(gl_FragCoord.xy + vec2(3.7, 9.1)) - 0.5) * 0.5;
+  // With no channel split (dispersion off or in focus) all three channels are
+  // identical — shade once instead of three times.
+  vec3 tRGB;
+  if (dsp > 1.0e-4) {
+    tRGB = vec3(
+      blurShadeT(q * (1.0 + dsp), L, Lrim, beta, jitter),
+      blurShadeT(q, L, Lrim, beta, jitter),
+      blurShadeT(q * (1.0 - dsp), L, Lrim, beta, jitter)
+    );
+  } else {
+    tRGB = vec3(blurShadeT(q, L, Lrim, beta, jitter));
+  }
+  // Highlight ceiling, applied once to the blurred radiance.
+  float tCeil = mix(0.6, 1.2, u_highlightCap);
+  tRGB = vec3(softClip(tRGB.x, tCeil), softClip(tRGB.y, tCeil), softClip(tRGB.z, tCeil));
 
   // --- Shade all channels through the ONE palette ---
   vec3 keyLin = toLinear(u_key);
@@ -757,8 +771,8 @@ void main() {
   // tone (the palette's own dark end is low-saturation by design, so a vivid
   // dark needs its own dye). Uses the center channel's carve mask; brightness
   // of the dye follows Shadow Floor.
-  float darkMaskM = pow(clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0), 1.6);
-  float wShadow = min(u_rimShadow * L * darkMaskM * 1.4, 1.0) * alpha;
+  float dmM = clamp(mix(1.0 - z, aq, 0.5), 0.0, 1.0);
+  float wShadow = min(u_rimShadow * L * dmM * sqrt(dmM) * 1.4, 1.0) * alpha;
   vec3 kHsv = rgb2hsv(u_key);
   vec3 shadowDye = toLinear(hsv2rgb(vec3(kHsv.x, 1.0, mix(0.1, 0.5, u_shadowFloor))));
   col = mix(col, shadowDye, wShadow * u_shadowTint);
