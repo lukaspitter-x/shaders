@@ -269,6 +269,30 @@ uniform float u_rimFollow;
 
 // SECTION: Light
 /**
+ * Shifts the rim's response along the tube relative to the sweep. Positive
+ * makes the rim flare BEFORE the hotspot arrives (grazing light announcing
+ * the sweep, like the reference); negative makes it trail behind. 0 keeps
+ * rim and sweep locked together.
+ * @label Rim Lead
+ * @default 0.2
+ * @range -1, 1
+ */
+uniform float u_rimLead;
+
+// SECTION: Light
+/**
+ * A dark counter-rim carved in under the hotspot — as the sweep arrives the
+ * silhouette edges darken below the body while the middle blooms (limb
+ * darkening under frontal light), so the lit stretch reads bright-middle /
+ * dark-edges. 0 = off.
+ * @label Rim Shadow
+ * @default 0.3
+ * @range 0, 1
+ */
+uniform float u_rimShadow;
+
+// SECTION: Light
+/**
  * How far the rim light reaches inward from the silhouette — thin crisp lines
  * vs broad bands bleeding toward the tube's core.
  * @label Rim Width
@@ -517,7 +541,7 @@ vec2 centerline(float nx, float flex) {
 // cylinder body + bloom + rim inside, spilled halo outside, blended across the
 // defocus-widened silhouette and soft-clipped to the highlight ceiling.
 // Dispersion calls this three times with slightly different q per channel.
-float shadeT(float q, float L, float beta) {
+float shadeT(float q, float L, float Lrim, float beta) {
   float aq = abs(q);
   float z = sqrt(max(1.0 - q * q, 0.0));
 
@@ -537,11 +561,20 @@ float shadeT(float q, float L, float beta) {
   // energy toward the lit stretch (dim floor away from it, flare under it);
   // negative carves the rim away under the hotspot so it glows in the dark
   // stretches; 0 is a uniform rim.
-  float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
-                 * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
+  // The rim rides Lrim — the light field sampled ahead of (or behind) the
+  // hotspot by Rim Lead — so it can flare before the sweep arrives. The
+  // bloom-melt in the denominator stays on the true L: the rim dissolves
+  // where the body actually blooms.
+  float sweepMul = mix(1.0, 0.12 + 1.75 * Lrim, max(u_rimFollow, 0.0))
+                 * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * Lrim);
   float rim = pow(1.0 - z, rimP) * u_rimIntensity * sweepMul / (1.0 + 0.9 * beta + 0.8 * u_bloomAmt * L);
 
   float tTube = body + bloom + rim;
+  // Rim Shadow: limb darkening under the hotspot. Where the true light is on
+  // top, the silhouette edges are carved BELOW the body level — the frontal-
+  // light state: bright middle, dark edges. Broad edge mask so the darkening
+  // reads as shading, not a line.
+  tTube *= 1.0 - min(u_rimShadow * L * pow(1.0 - z, 3.0) * 1.2, 0.95);
 
   // The void: near-black key-tinted air + the tube's spilled halo. The halo
   // hugs the silhouette (crisp when in focus) and reaches farther, softer,
@@ -571,9 +604,9 @@ float shadeT(float q, float L, float beta) {
 // edges. The taps ride on shadeT's procedurally softened base, so the 5-tap
 // kernel stays band-free even at large radii. In-focus (rad→0) collapses to a
 // single sample.
-float blurShadeT(float q, float L, float beta) {
+float blurShadeT(float q, float L, float Lrim, float beta) {
   float rad = 1.2 * beta;
-  if (rad < 1.0e-3) return shadeT(q, L, beta);
+  if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta);
   const int TAPS = 9;
   float sum = 0.0;
   float wsum = 0.0;
@@ -583,7 +616,7 @@ float blurShadeT(float q, float L, float beta) {
     // dither already sets that texture) instead of visible ghost edges.
     float jj = (hash21(gl_FragCoord.xy + vec2(float(i) * 17.13, 7.7)) - 0.5) * 0.5;
     float gw = exp(-o * o * 0.15);
-    sum += shadeT(q + (o + jj) * 0.25 * rad, L, beta) * gw;
+    sum += shadeT(q + (o + jj) * 0.25 * rad, L, Lrim, beta) * gw;
     wsum += gw;
   }
   return sum / wsum;
@@ -629,6 +662,11 @@ void main() {
   float xh = (fract(phase + u_lightOffset) - 0.5) * P;
   float dw = (fract((nx - xh) / P + 0.5) - 0.5) * P;
   float L = exp(-dw * dw / (2.0 * sigma * sigma));
+  // The rim's copy of the light field, sampled ahead of the hotspot by Rim
+  // Lead (in tube-length units) — the rim sees the light arrive early (or
+  // late), while the body bloom stays on the true hotspot.
+  float dwR = (fract((nx - u_rimLead - xh) / P + 0.5) - 0.5) * P;
+  float Lrim = exp(-dwR * dwR / (2.0 * sigma * sigma));
 
   // --- Dispersion: per-channel tube radius, defocus-gated ---
   // Each channel shades the tube at a slightly scaled q — blue sees a fatter
@@ -639,9 +677,9 @@ void main() {
   // purely in the out-of-focus smear, which is where real glass fringes too.
   float dsp = u_dispersion * beta * 0.09;
   vec3 tRGB = vec3(
-    blurShadeT(q * (1.0 + dsp), L, beta),
-    blurShadeT(q, L, beta),
-    blurShadeT(q * (1.0 - dsp), L, beta)
+    blurShadeT(q * (1.0 + dsp), L, Lrim, beta),
+    blurShadeT(q, L, Lrim, beta),
+    blurShadeT(q * (1.0 - dsp), L, Lrim, beta)
   );
 
   // --- Shade all channels through the ONE palette ---
