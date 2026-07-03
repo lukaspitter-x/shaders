@@ -573,6 +573,40 @@ uniform float u_ambient;
 
 // SECTION: Effects
 /**
+ * Ambient light's dark twin: an ambient-occlusion ring that darkens the wall
+ * wherever it is near the ball, all the way around — independent of the
+ * stripes, the sweep and the directional shadows. Seats the ball into the
+ * wall even when the cast shadows are off or swung away.
+ * @label Ambient Shadow
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_aoShadow;
+
+// SECTION: Effects
+/**
+ * Reach of the Ambient Shadow ring — tight contact-line darkening at the seam
+ * vs a wide soft occlusion gradient breathing around the whole silhouette.
+ * @label AO Spread
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_aoSpread;
+
+// SECTION: Effects
+/**
+ * Saturation of the Ambient Shadow. 0 = a neutral tonal darkening (pure AO);
+ * higher pulls the occluded ring toward a deep, saturated Key Color tone, so
+ * the contact shadow reads as dense colored pigment instead of grey. A
+ * neutral key stays neutral.
+ * @label AO Saturation
+ * @default 0.6
+ * @range 0, 1
+ */
+uniform float u_aoSat;
+
+// SECTION: Effects
+/**
  * Depth blur — global depth-of-field: softens the wall light and extends how far
  * the bloom and cast shadow reach, all progressively with distance from the ball.
  * The seam stays crisp while everything recedes out of focus, selling the ball as
@@ -861,6 +895,13 @@ void main() {
   float syncMod = mix(1.0, sMid, clamp(u_shadowSync, 0.0, 1.0));
   float shadowAmt = clamp((shadow1 + shadow2) * 1.7 * syncMod, 0.0, 0.93);
   tBg = max(tBg * (1.0 - shadowAmt), 0.0);
+  // Ambient Shadow: an omnidirectional occlusion ring hugging the seam — the
+  // wall darkens wherever it is near the ball regardless of the light, the
+  // stripes or the directional pair above (which sway, sync and delay; this
+  // never moves). Its colour treatment happens in the shading stage below.
+  float aoDome = mirrorDome(r, (0.06 + 0.7 * u_aoSpread) * atmos, 2.0);
+  float aoAmt = clamp(aoDome * u_aoShadow * 1.2, 0.0, 0.9);
+  tBg = max(tBg * (1.0 - aoAmt), 0.0);
 
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
@@ -881,6 +922,12 @@ void main() {
   float dyeVal = mix(0.05, 0.7, clamp(u_shadowTintVal, 0.0, 1.0));
   vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, dyeSat, dyeVal)));
   bgCol = mix(bgCol, shadowDye, u_shadowTint * shadowAmt);
+  // Ambient Shadow colour: the tonal darkening already happened pre-palette;
+  // AO Saturation re-dyes that ring toward a deep key tone (full key-scaled
+  // saturation, brightness fixed dark enough to stay a shadow but light
+  // enough to show its hue). At 0 the ring stays a neutral darkening.
+  vec3 aoDye = toLinear(hsv2rgb(vec3(keyHsv.x, sqrt(keyHsv.y), 0.28)));
+  bgCol = mix(bgCol, aoDye, aoAmt * u_aoSat);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
