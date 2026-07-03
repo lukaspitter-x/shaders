@@ -461,6 +461,29 @@ uniform float u_shadowSway;
 
 // SECTION: Effects
 /**
+ * Time-shifts the shadows' response to the stripes, as a fraction of the loop —
+ * they trail (positive) or lead (negative) the sweep, like the glow's Glow
+ * Delay. 0 = locked to the backdrop clock (classic).
+ * @label Shadow Delay
+ * @default 0
+ * @range -0.5, 0.5
+ */
+uniform float u_shadowLag;
+
+// SECTION: Effects
+/**
+ * Breathes the shadows' strength with the light actually hitting the ball —
+ * no light, no shadow. 0 = constant strength (classic, only the direction
+ * sways); 1 = the shadows fully surge as a light band crosses the ball and
+ * dissolve while a dark band covers it, in lockstep with the stripes.
+ * @label Shadow Sync
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_shadowSync;
+
+// SECTION: Effects
+/**
  * Rotates the axis the shadow pair is thrown along, in half-turns. 0 = the
  * classic horizontal throw that follows the light sweep; 0.5 swings it
  * vertical (primary shadow downward when the light tops the ball); small
@@ -507,15 +530,37 @@ uniform float u_shadowCurve;
 
 // SECTION: Effects
 /**
- * Dyes the shadowed wall toward a deep, fully saturated key tone instead of
- * the palette's muted near-black — juicy, vivid shadows. The dye's hue and
- * saturation follow the Key Color (a neutral key keeps neutral shadows).
- * 0 = classic tonal darkening only.
+ * Opacity of the shadow dye — how much the shadowed wall is pulled toward the
+ * key-hued tint instead of the palette's muted near-black. Set the dye's
+ * character with Tint Saturation and Tint Brightness below. 0 = classic tonal
+ * darkening only.
  * @label Shadow Tint
  * @default 0
  * @range 0, 1
  */
 uniform float u_shadowTint;
+
+// SECTION: Effects
+/**
+ * Saturation of the shadow dye. Scaled by the Key Color's own saturation (a
+ * neutral key keeps neutral shadows), so 1 = as vivid as the key allows and
+ * low washes the dye toward smoke.
+ * @label Tint Saturation
+ * @default 0.85
+ * @range 0, 1
+ */
+uniform float u_shadowTintSat;
+
+// SECTION: Effects
+/**
+ * Brightness of the shadow dye — the juice lever. Low = deep inky shade that
+ * reads nearly black; high = a luminous colored shadow that visibly carries
+ * the key hue against the backdrop, more a colored gel than a shadow.
+ * @label Tint Brightness
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_shadowTintVal;
 
 // SECTION: Effects
 /**
@@ -777,10 +822,12 @@ void main() {
   // at low blur, long and diffuse at high blur (an area-light penumbra).
   float ballCenterNx = u_ballX / aspect;
   float so = min(0.5, period * 0.25);   // sample the gradient across the nearest band
-  // Shadow direction is a BACKDROP effect — keep it on the base scroll (with the
-  // stripes), so Ball Light Delay offsets only the ball's own surface lighting.
-  float sLeft = stripeField(ballCenterNx - so, scroll, period, soft, u_stripeBalance);
-  float sRight = stripeField(ballCenterNx + so, scroll, period, soft, u_stripeBalance);
+  // The shadows read the grating on their own clock: base is the backdrop scroll
+  // (so Ball Light Delay offsets only the ball's surface lighting), and Shadow
+  // Delay shifts them off it to trail or lead the sweep.
+  float shadowScroll = scroll + u_shadowLag * period;
+  float sLeft = stripeField(ballCenterNx - so, shadowScroll, period, soft, u_stripeBalance);
+  float sRight = stripeField(ballCenterNx + so, shadowScroll, period, soft, u_stripeBalance);
   // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
   // normalized, so as the softbox sweeps the value eases through zero and the
   // shadow slides gently across instead of snapping between sides. Its magnitude
@@ -807,7 +854,12 @@ void main() {
   float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos * u_shadowSpread, sCurve);
   float shadow1 = dome1 * (0.12 + 0.88 * dirAway) * u_contact; // 0.12 floor seats the ball
   float shadow2 = dome2 * dirToward * u_shadow2;
-  float shadowAmt = clamp((shadow1 + shadow2) * 1.7, 0.0, 0.93);
+  // Shadow Sync: no light, no shadow — scale the strength by the stripe light
+  // actually on the ball (on the shadows' clock), so they surge under a light
+  // band and dissolve under a dark one.
+  float sMid = stripeField(ballCenterNx, shadowScroll, period, soft, u_stripeBalance);
+  float syncMod = mix(1.0, sMid, clamp(u_shadowSync, 0.0, 1.0));
+  float shadowAmt = clamp((shadow1 + shadow2) * 1.7 * syncMod, 0.0, 0.93);
   tBg = max(tBg * (1.0 - shadowAmt), 0.0);
 
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
@@ -818,12 +870,16 @@ void main() {
   // --- Shade both through the ONE palette ---
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
-  // Shadow Tint: dye the shadowed wall toward a deep, saturated key tone (the
+  // Shadow Tint: dye the shadowed wall toward a saturated key tone (the
   // palette's own dark end is low-saturation by design, so a vivid shadow needs
-  // its own dye — Tube's trick). Saturation follows the KEY's (sqrt-boosted), so
-  // a neutral key gets a neutral dye, never an invented hue.
+  // its own dye — Tube's trick). Tint Saturation and Tint Brightness shape the
+  // dye; its saturation is still scaled by the KEY's own (sqrt-boosted), so a
+  // neutral key gets a neutral dye, never an invented hue. The dye is mixed in
+  // BEFORE the hue drift and additive glow, so those keep acting on top of it.
   vec3 keyHsv = rgb2hsv(u_key);
-  vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, sqrt(keyHsv.y), 0.22)));
+  float dyeSat = u_shadowTintSat * sqrt(keyHsv.y);
+  float dyeVal = mix(0.05, 0.7, clamp(u_shadowTintVal, 0.0, 1.0));
+  vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, dyeSat, dyeVal)));
   bgCol = mix(bgCol, shadowDye, u_shadowTint * shadowAmt);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
