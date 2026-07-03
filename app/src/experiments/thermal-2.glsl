@@ -573,37 +573,37 @@ uniform float u_ambient;
 
 // SECTION: Effects
 /**
- * Ambient light's dark twin: an ambient-occlusion ring that darkens the wall
- * wherever it is near the ball, all the way around — independent of the
- * stripes, the sweep and the directional shadows. Seats the ball into the
- * wall even when the cast shadows are off or swung away.
- * @label Ambient Shadow
+ * A volumetric fog shell around the ball — the opposite of the glow. Light
+ * passing near the silhouette is absorbed: it goes a touch darker and its
+ * colour densifies, while the stripes, glow and shadows underneath keep
+ * their texture (nothing is painted over). Wraps the whole ball,
+ * independent of the sweep.
+ * @label Fog Density
  * @default 0
  * @range 0, 1
  */
-uniform float u_aoShadow;
+uniform float u_fogDensity;
 
 // SECTION: Effects
 /**
- * Reach of the Ambient Shadow ring — tight contact-line darkening at the seam
- * vs a wide soft occlusion gradient breathing around the whole silhouette.
- * @label AO Spread
+ * Reach of the fog shell — a thin film hugging the silhouette vs a deep
+ * volume breathing far around the ball.
+ * @label Fog Spread
  * @default 0.35
  * @range 0, 1
  */
-uniform float u_aoSpread;
+uniform float u_fogSpread;
 
 // SECTION: Effects
 /**
- * Saturation of the Ambient Shadow. 0 = a neutral tonal darkening (pure AO);
- * higher pulls the occluded ring toward a deep, saturated Key Color tone, so
- * the contact shadow reads as dense colored pigment instead of grey. A
- * neutral key stays neutral.
- * @label AO Saturation
+ * How much the fogged light densifies in colour — saturation pushed toward a
+ * deeper, juicier version of whatever hue is already there (so it stays in
+ * the key family by construction). 0 = the fog only dims.
+ * @label Fog Saturation
  * @default 0.6
  * @range 0, 1
  */
-uniform float u_aoSat;
+uniform float u_fogSat;
 
 // SECTION: Effects
 /**
@@ -895,13 +895,6 @@ void main() {
   float syncMod = mix(1.0, sMid, clamp(u_shadowSync, 0.0, 1.0));
   float shadowAmt = clamp((shadow1 + shadow2) * 1.7 * syncMod, 0.0, 0.93);
   tBg = max(tBg * (1.0 - shadowAmt), 0.0);
-  // Ambient Shadow: an omnidirectional occlusion ring hugging the seam — the
-  // wall darkens wherever it is near the ball regardless of the light, the
-  // stripes or the directional pair above (which sway, sync and delay; this
-  // never moves). Its colour treatment happens in the shading stage below.
-  float aoDome = mirrorDome(r, (0.06 + 0.7 * u_aoSpread) * atmos, 2.0);
-  float aoAmt = clamp(aoDome * u_aoShadow * 1.2, 0.0, 0.9);
-  tBg = max(tBg * (1.0 - aoAmt), 0.0);
 
   // Additive glow: stack the light-leak in ILLUMINATION space, before the
   // ceiling — it overdrives the hottest spots like a real leak, but the same
@@ -929,12 +922,17 @@ void main() {
   float dyeVal = mix(0.05, 0.7, clamp(u_shadowTintVal, 0.0, 1.0));
   vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, dyeSat, dyeVal)));
   bgCol = mix(bgCol, shadowDye, u_shadowTint * shadowAmt);
-  // Ambient Shadow colour: the tonal darkening already happened pre-palette;
-  // AO Saturation re-dyes that ring toward a deep key tone (full key-scaled
-  // saturation, brightness fixed dark enough to stay a shadow but light
-  // enough to show its hue). At 0 the ring stays a neutral darkening.
-  vec3 aoDye = toLinear(hsv2rgb(vec3(keyHsv.x, sqrt(keyHsv.y), 0.28)));
-  bgCol = mix(bgCol, aoDye, aoAmt * u_aoSat);
+  // Fog halo: a volumetric absorption shell around the ball — the glow's
+  // opposite. It MODULATES the light already on the wall instead of painting
+  // its own colour: brightness dips (absorption) and the remaining colour is
+  // pushed away from its own grey (densification), so bright stripe light
+  // near the ball turns darker and juicier while all texture survives.
+  float fogDome = mirrorDome(r, (0.08 + 0.9 * u_fogSpread) * atmos, 2.0);
+  float fog = clamp(fogDome * u_fogDensity, 0.0, 1.0);
+  bgCol *= 1.0 - 0.55 * fog;
+  float fogLuma = dot(bgCol, vec3(0.2126, 0.7152, 0.0722));
+  vec3 dense = max(mix(vec3(fogLuma), bgCol, 1.0 + 1.5 * u_fogSat), 0.0);
+  bgCol = mix(bgCol, dense, fog);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
