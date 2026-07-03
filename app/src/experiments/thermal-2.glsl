@@ -461,6 +461,64 @@ uniform float u_shadowSway;
 
 // SECTION: Effects
 /**
+ * Rotates the axis the shadow pair is thrown along, in half-turns. 0 = the
+ * classic horizontal throw that follows the light sweep; 0.5 swings it
+ * vertical (primary shadow downward when the light tops the ball); small
+ * values give a diagonal drop like a raked key light.
+ * @label Shadow Angle
+ * @default 0
+ * @range -1, 1
+ */
+uniform float u_shadowAngle;
+
+// SECTION: Effects
+/**
+ * Angular width of each shadow lobe — how far around the ball it wraps. Low
+ * pinches it into a narrow directional wedge; high wraps it into a broad
+ * crescent that hugs most of the silhouette.
+ * @label Shadow Arc
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_shadowArc;
+
+// SECTION: Effects
+/**
+ * Reach of the cast shadows, independent of their strength — a multiplier on
+ * both shadows' footprints. 1 = tied to each shadow's strength as before;
+ * lower tucks them against the seam, higher throws them far across the wall.
+ * @label Shadow Spread
+ * @default 1
+ * @range 0.25, 2
+ */
+uniform float u_shadowSpread;
+
+// SECTION: Effects
+/**
+ * Progressiveness of the shadows' falloff across their reach. Low = dense at
+ * the seam, dropping off steeply into a faint tail; high = an even, penumbra-
+ * like shade that stays strong across its full footprint before letting go.
+ * 0.5 is the classic dome falloff.
+ * @label Shadow Curve
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_shadowCurve;
+
+// SECTION: Effects
+/**
+ * Dyes the shadowed wall toward a deep, fully saturated key tone instead of
+ * the palette's muted near-black — juicy, vivid shadows. The dye's hue and
+ * saturation follow the Key Color (a neutral key keeps neutral shadows).
+ * 0 = classic tonal darkening only.
+ * @label Shadow Tint
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_shadowTint;
+
+// SECTION: Effects
+/**
  * Ambient fill so the shadow side never drops fully to black.
  * @label Ambient
  * @default 0.18
@@ -728,19 +786,29 @@ void main() {
   // shadow slides gently across instead of snapping between sides. Its magnitude
   // fades the shadow out near head-on, when there is no clear dark side.
   float lightX = sRight - sLeft;                             // smooth signed light direction
-  float lean = -outward.x * lightX * u_shadowSway * 2.0;     // >0 on the far (shadow) side
-  // Linger through centre: a soft dead-zone near zero lean keeps each shadow in
-  // its neutral, seam-only state longer before committing to a side, so it dwells
-  // as the light passes head-on instead of hurrying across.
-  float dirAway = smoothstep(0.15, 1.0, clamp(lean, 0.0, 1.0));
-  float dirToward = smoothstep(0.15, 1.0, clamp(-lean, 0.0, 1.0));
+  // Shadow Angle rotates the axis the pair is thrown along — 0 keeps the classic
+  // horizontal throw, other angles let the shadows drop diagonally or vertically
+  // while still swaying with the sweep.
+  float sAng = u_shadowAngle * 3.14159265;
+  vec2 sAxis = vec2(cos(sAng), sin(sAng));
+  float lean = -dot(outward, sAxis) * lightX * u_shadowSway * 2.0; // >0 on the far (shadow) side
+  // Angular lobe: smoothstep keeps the response easing gently through zero (the
+  // shadow dwells as the light passes head-on instead of hurrying across), and
+  // Shadow Arc's exponent sets how wide the lobe wraps — high exponent pinches a
+  // narrow wedge, low wraps a broad crescent.
+  float wedgeExp = mix(4.0, 0.5, clamp(u_shadowArc, 0.0, 1.0));
+  float dirAway = pow(smoothstep(0.0, 1.0, clamp(lean, 0.0, 1.0)), wedgeExp);
+  float dirToward = pow(smoothstep(0.0, 1.0, clamp(-lean, 0.0, 1.0)), wedgeExp);
   // Two mirrored-dome shadows — the primary away from the light, a second one the
-  // opposite way — each crisp at the seam and diffusing outward, with its own reach.
-  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos, 2.0);
-  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos, 2.0);
+  // opposite way. Shadow Spread scales both footprints independent of strength;
+  // Shadow Curve reshapes the radial falloff (dense seam + tail vs even penumbra).
+  float sCurve = mix(3.5, 0.5, clamp(u_shadowCurve, 0.0, 1.0));
+  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos * u_shadowSpread, sCurve);
+  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos * u_shadowSpread, sCurve);
   float shadow1 = dome1 * (0.12 + 0.88 * dirAway) * u_contact; // 0.12 floor seats the ball
   float shadow2 = dome2 * dirToward * u_shadow2;
-  tBg = max(tBg * (1.0 - clamp((shadow1 + shadow2) * 1.7, 0.0, 0.93)), 0.0);
+  float shadowAmt = clamp((shadow1 + shadow2) * 1.7, 0.0, 0.93);
+  tBg = max(tBg * (1.0 - shadowAmt), 0.0);
 
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
@@ -750,6 +818,13 @@ void main() {
   // --- Shade both through the ONE palette ---
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
+  // Shadow Tint: dye the shadowed wall toward a deep, saturated key tone (the
+  // palette's own dark end is low-saturation by design, so a vivid shadow needs
+  // its own dye — Tube's trick). Saturation follows the KEY's (sqrt-boosted), so
+  // a neutral key gets a neutral dye, never an invented hue.
+  vec3 keyHsv = rgb2hsv(u_key);
+  vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, sqrt(keyHsv.y), 0.22)));
+  bgCol = mix(bgCol, shadowDye, u_shadowTint * shadowAmt);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
