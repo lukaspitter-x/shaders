@@ -286,12 +286,72 @@ uniform float u_emissive;
 /**
  * Fake bloom: the Diffuse Scatter mirrored outward onto the wall — crisp at the
  * silhouette, diffusing progressively as it spreads. Higher = a wider, softer
- * glow that reaches farther and blurs more toward its outer edge.
+ * glow that reaches farther and blurs more toward its outer edge. The master
+ * amount; Glow Spread / Intensity / Curve / Fill / Delay below refine it.
  * @label Bloom / Glow
  * @default 0.8
  * @range 0, 2
  */
 uniform float u_bloom;
+
+// SECTION: Effects
+/**
+ * Reach of the ball's glow on the wall, independent of its brightness — a
+ * multiplier on the halo's footprint. 1 = tied to Bloom/Glow as before; lower
+ * pulls the glow into a tight aura at the seam, higher throws it far across
+ * the wall.
+ * @label Glow Spread
+ * @default 1
+ * @range 0.25, 2
+ */
+uniform float u_glowSpread;
+
+// SECTION: Effects
+/**
+ * Brightness of the ball's glow on the wall, independent of its reach.
+ * 1 = unchanged; use with Glow Spread to set reach and heat separately
+ * (Bloom/Glow alone couples them).
+ * @label Glow Intensity
+ * @default 1
+ * @range 0, 4
+ */
+uniform float u_glowIntensity;
+
+// SECTION: Effects
+/**
+ * Progressiveness of the glow's falloff across its reach. Low = a hot seam
+ * that drops off steeply into a long faint tail; high = an even, plateau-like
+ * glow that stays strong across its full footprint before letting go. 0.5
+ * is the classic dome falloff.
+ * @label Glow Curve
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_glowCurve;
+
+// SECTION: Effects
+/**
+ * Lets the ball cast glow into the DARK bands too. The halo is normally
+ * multiplied by the stripe light, so the side facing a dark band gets no glow
+ * at all — this floors that modulation. 0 = glow only where the stripes light
+ * the ball (classic); 1 = a full omnidirectional aura regardless of the
+ * stripes, as if the ball itself were the light source.
+ * @label Glow Fill
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_glowFloor;
+
+// SECTION: Effects
+/**
+ * Time-shifts the glow's response to the stripes, as a fraction of the loop —
+ * the halo trails (positive) or leads (negative) the ball's own rim lighting,
+ * like an afterglow with inertia. 0 = in lockstep with the rim.
+ * @label Glow Delay
+ * @default 0
+ * @range -0.5, 0.5
+ */
+uniform float u_glowLag;
 
 // SECTION: Effects
 /**
@@ -511,10 +571,12 @@ float blurStripe(float x, float scroll, float period, float soft, float balance,
 // at the edge (r=1) and diffusing progressively softer to nothing at r=1+width —
 // the mirror of the ball's inward Diffuse Scatter. Used for BOTH the outward
 // bloom and the cast shadow, so each is least blurred at the seam, blurrier out.
-float mirrorDome(float r, float width) {
+// `expo` shapes the falloff: high hugs the seam and tails off fast, low spreads
+// an even plateau across the full width. Shadows use the classic 2.0.
+float mirrorDome(float r, float width, float expo) {
   float d = clamp((r - 1.0) / max(width, 1.0e-3), 0.0, 1.0);
   float zMir = sqrt(max(1.0 - (1.0 - d) * (1.0 - d), 0.0));
-  return pow(1.0 - zMir, 2.0) * step(1.0, r);
+  return pow(1.0 - zMir, expo) * step(1.0, r);
 }
 
 // Soft highlight ceiling: near-linear below `ceil`, smoothly saturating toward it
@@ -626,8 +688,23 @@ void main() {
   // and blurrier the farther it reaches. Bloom sets the reach: a small glow stays
   // tight (little blur), a large one diffuses far (more blur).
   float atmos = mix(0.7, 1.5, u_depthBlur);   // Depth Blur scales how far glow/shadow reach
-  float glow = mirrorDome(r, (0.25 + 1.5 * u_bloom) * atmos);
-  vec3 halo = glow * ballLit * (u_bloom * 1.3 + 0.5 * u_emissive);
+  float glowW = (0.25 + 1.5 * u_bloom) * atmos * u_glowSpread;
+  float glow = mirrorDome(r, glowW, mix(3.5, 0.5, u_glowCurve));
+  // The halo reads the grating on its OWN clock (Glow Delay shifts it off the
+  // ball's rim lighting), through the same tracking transform as the rim so
+  // both respond to the stripes with the same contrast. Glow Fill then floors
+  // the modulation, letting the ball throw light into the dark bands too.
+  float glowScroll = ballScroll + u_glowLag * period;
+  vec3 sGlow = vec3(
+    stripeField(bx + chOff.x, glowScroll, period, soft, u_stripeBalance),
+    stripeField(bx + chOff.y, glowScroll, period, soft, u_stripeBalance),
+    stripeField(bx + chOff.z, glowScroll, period, soft, u_stripeBalance)
+  );
+  vec3 sGlowTrk = mix(sGlow, smoothstep(vec3(0.15), vec3(0.85), sGlow), trk);
+  vec3 glowLit = ambFloor + (1.0 - ambFloor) * sGlowTrk;
+  glowLit *= 1.0 + trk * sGlowTrk;
+  glowLit = max(glowLit, vec3(u_glowFloor));
+  vec3 halo = glow * glowLit * (u_bloom * 1.3 + 0.5 * u_emissive) * u_glowIntensity;
   tBg += halo;
   // Capture pre-ceiling brightness (rim inside, halo outside) as the light-leak
   // source, so the additive glow can lift beyond the ceiling that clamps them next.
@@ -659,8 +736,8 @@ void main() {
   float dirToward = smoothstep(0.15, 1.0, clamp(-lean, 0.0, 1.0));
   // Two mirrored-dome shadows — the primary away from the light, a second one the
   // opposite way — each crisp at the seam and diffusing outward, with its own reach.
-  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos);
-  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos);
+  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos, 2.0);
+  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos, 2.0);
   float shadow1 = dome1 * (0.12 + 0.88 * dirAway) * u_contact; // 0.12 floor seats the ball
   float shadow2 = dome2 * dirToward * u_shadow2;
   tBg = max(tBg * (1.0 - clamp((shadow1 + shadow2) * 1.7, 0.0, 0.93)), 0.0);
