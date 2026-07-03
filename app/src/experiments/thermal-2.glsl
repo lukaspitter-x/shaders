@@ -355,10 +355,10 @@ uniform float u_glowLag;
 
 // SECTION: Effects
 /**
- * Additive glow — a real light-leak layer that STACKS on top (added in linear
- * light space) from the corona + halo, so it can lift beyond the Highlight
- * Ceiling and bloom toward white. 0 = off; unlike Bloom/Glow this is not tone-
- * mapped, so push gently.
+ * Additive glow — a light-leak layer that STACKS on top of the corona + halo,
+ * overdriving the hottest spots. Clamped by the Highlight Ceiling and shaded
+ * through the one palette like every other tone, so however hard it is pushed
+ * it can never blow past the Color group's caps.
  * @label Additive Glow
  * @default 0
  * @range 0, 2
@@ -843,8 +843,8 @@ void main() {
   glowLit = max(glowLit, vec3(u_glowFloor));
   vec3 halo = glow * glowLit * (u_bloom * 1.3 + 0.5 * u_emissive) * u_glowIntensity;
   tBg += halo;
-  // Capture pre-ceiling brightness (rim inside, halo outside) as the light-leak
-  // source, so the additive glow can lift beyond the ceiling that clamps them next.
+  // Capture the corona/halo brightness as the additive glow's source — it is
+  // stacked back into the illumination just before the ceiling below.
   float glowIn = dot(tBall, vec3(0.3333));
   float glowOut = dot(halo, vec3(0.3333));
 
@@ -903,6 +903,13 @@ void main() {
   float aoAmt = clamp(aoDome * u_aoShadow * 1.2, 0.0, 0.9);
   tBg = max(tBg * (1.0 - aoAmt), 0.0);
 
+  // Additive glow: stack the light-leak in ILLUMINATION space, before the
+  // ceiling — it overdrives the hottest spots like a real leak, but the same
+  // Highlight Ceiling clamps it and the same palette shades it (Highlight
+  // Saturation, hue drifts), so the Color group always has the last word.
+  tBall += vec3(glowIn * u_glowAdd);
+  tBg += vec3(glowOut * u_glowAdd);
+
   // Highlight ceiling: soft-limit every tone so nothing blows out to white.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
   tBg = softClip(tBg, tCeil);
@@ -948,14 +955,7 @@ void main() {
   hsv.x = fract(hsv.x + 0.06 * (u_hueSpread * litN + u_hueShadow * darkN) + 1.0);
   col = hsv2rgb(hsv);
 
-  // Additive glow (light-leak): stack a key-tinted glow on top in LINEAR space,
-  // sourced from the pre-ceiling corona/halo. Unlike the tone-mapped bloom this
-  // can push col past 1 → blooms to white at the hottest spots when driven hard.
-  float glowSrc = mix(glowOut, glowIn, ballMask);
-  vec3 glowCol = mix(keyLin, vec3(1.0), 0.5);
-  col += glowCol * glowSrc * u_glowAdd;
-
-  // Gamma-encode (toGamma clamps to [0,1], so hue/dispersion/glow can't push a
+  // Gamma-encode (toGamma clamps to [0,1], so hue/dispersion can't push a
   // channel past white on screen).
   col = toGamma(col);
 
