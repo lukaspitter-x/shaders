@@ -44,13 +44,26 @@ uniform vec3 u_key;
 
 // SECTION: Color
 /**
- * Analogous hue drift across the light gradient (warmer toward the softbox,
- * cooler away). 0 = strict monochrome; higher = juicier.
- * @label Hue Spread
+ * Hue drift of the LIT tones (corona lobe, bright stripe, halo) away from the
+ * key. Positive walks toward the key's warm neighbour (violet for a blue key),
+ * negative toward the cool one (cyan). 0 keeps lit tones strictly on-key.
+ * @label Hue Lit
  * @default 0.25
- * @range 0, 1
+ * @range -1, 1
  */
 uniform float u_hueSpread;
+
+// SECTION: Color
+/**
+ * Hue drift of the SHADOW tones (dark bands, dim rim, cast shadow) — same
+ * signed scale as Hue Lit. Give it the opposite sign for a classic
+ * warm-light/cool-shadow split, or the same sign to push the whole gradient
+ * one way.
+ * @label Hue Shadow
+ * @default -0.15
+ * @range -1, 1
+ */
+uniform float u_hueShadow;
 
 // SECTION: Color
 /**
@@ -668,11 +681,16 @@ void main() {
   float ballMask = smoothstep(1.0 + 1.5 * px, 1.0 - 1.5 * px, r);
   vec3 col = mix(bgCol, ballCol, ballMask);
 
-  // Hue Spread: subtle analogous drift, warmer toward the stripe — applied
-  // uniformly to ball and wall so they stay hue-matched.
-  float lit = mix(sBg.y, sBall.y, ballMask);
+  // Hue Lit / Hue Shadow: signed analogous drift at each end of the light
+  // gradient (Tube's model). `lit` is the pixel's actual illumination level —
+  // not the raw stripe phase — so the black core stays put while the corona
+  // lobe and bright bands drift. Applied to ball and wall alike so they stay
+  // hue-matched.
+  float lit = mix(tBg.y, tBall.y, ballMask);
+  float litN = smoothstep(0.35, 0.85, lit);
+  float darkN = smoothstep(0.35, 0.05, lit);
   vec3 hsv = rgb2hsv(col);
-  hsv.x = fract(hsv.x + u_hueSpread * 0.03 * (lit - 0.5));
+  hsv.x = fract(hsv.x + 0.06 * (u_hueSpread * litN + u_hueShadow * darkN) + 1.0);
   col = hsv2rgb(hsv);
 
   // Additive glow (light-leak): stack a key-tinted glow on top in LINEAR space,
