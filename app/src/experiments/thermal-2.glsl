@@ -234,6 +234,19 @@ uniform float u_rimReach;
 
 // SECTION: Light
 /**
+ * Bends the light bands around the ball's 3-D form. Each scanline of the
+ * ball is remapped to the sphere's width at that height, so a straight
+ * vertical band bows into an arc as it crosses the face — squeezed toward
+ * the poles and the limb, like a pattern wrapped on a globe. 0 = flat bands
+ * (classic).
+ * @label Sphere Wrap
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_ballCurve;
+
+// SECTION: Light
+/**
  * How far inward from the silhouette the light reaches — thin ring vs broad glow
  * bleeding toward the center.
  * @label Corona Width
@@ -829,7 +842,16 @@ void main() {
   // Reach further out along its own normal, so a rim point "sees" the stripe it
   // faces — the lever that makes the corona lobe sweep around the silhouette.
   // Both share the one field, so wall and ball move together.
-  float bx = nx + u_rimReach * outward.x;
+  // Sphere Wrap first bends the grating around the ball's form: each scanline
+  // is remapped to the sphere's chord width at that height, so a vertical
+  // band bows into an arc across the face — compressed toward the poles and
+  // the limb. Fades out at the silhouette so the wall stays flat.
+  float bcNx = u_ballX / aspect;
+  float cyn = clamp(c.y / max(R, 1.0e-4), -1.0, 1.0);
+  float sliceW = sqrt(max(1.0 - cyn * cyn, 0.0));
+  float curvedNx = bcNx + (nx - bcNx) / max(sliceW, 0.2);
+  float curveMask = smoothstep(1.1, 0.9, r) * clamp(u_ballCurve, 0.0, 1.0);
+  float bx = mix(nx, curvedNx, curveMask) + u_rimReach * outward.x;
   // Depth blur radius grows with distance outside the ball → crisp seam, soft
   // distance. The ball rim (r≈1) gets ~0 spread, so it stays sharp.
   float spread = u_depthBlur * max(r - 1.0, 0.0) * 0.6;
