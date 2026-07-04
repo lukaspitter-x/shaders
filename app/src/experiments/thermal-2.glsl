@@ -581,10 +581,11 @@ uniform float u_dropY;
 
 // SECTION: Drop Shadow
 /**
- * Slides the disc with the light stripes: it is thrown AWAY from the
- * sweeping light like a real cast shadow, easing through centre as the
- * light passes head-on. Stacks on top of the static offsets — those set the
- * disc's home, this animates around it. 0 = static.
+ * Width of the shadow wave's travel. The disc rides the light grating in ONE
+ * direction — each passing band carries a shadow wave across the ball
+ * right→left with the stripes, fading out at the hand-off so the next wave
+ * enters seamlessly. Never swings back. Offset X/Y set the wave's home line.
+ * 0 = static disc.
  * @label Sway
  * @default 0.5
  * @range 0, 1
@@ -857,15 +858,20 @@ void main() {
   // ball's seam to melted far away. The key dye follows in the colour stage.
   float dsScroll = scroll + u_dropSwayLag * period;
   float dsNx = u_ballX / aspect;
-  float dsSo = min(0.5, period * 0.25);
-  float dsDir = stripeField(dsNx + dsSo, dsScroll, period, soft, u_stripeBalance)
-              - stripeField(dsNx - dsSo, dsScroll, period, soft, u_stripeBalance);
-  vec2 dropC = c - vec2(u_dropX - u_dropSway * dsDir * 0.9, u_dropY) * R;
+  // One-way waves: the disc rides the grating's own phase, so it travels
+  // right→left with the stripes — one shadow wave per band — and its
+  // presence fades to zero at the wrap so the next wave hands over without
+  // a pop or a reverse swing.
+  float dsPh = fract((dsNx + dsScroll) / period);
+  float dsPos = (0.5 - dsPh) * 2.0;
+  float dsEnv = sin(3.14159265 * dsPh);
+  vec2 dropC = c - vec2(u_dropX + u_dropSway * dsPos * 1.2, u_dropY) * R;
   float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
   float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
   float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
   float dropB = max(u_dropBlur * dropGrade, 0.01);
   float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
+  dropMask *= mix(1.0, dsEnv, clamp(u_dropSway * 2.0, 0.0, 1.0));
   tBg *= 1.0 - dropMask;
   tBg += halo;
   // Capture the corona/halo brightness as the additive glow's source — it is
