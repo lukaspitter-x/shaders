@@ -518,10 +518,9 @@ uniform float u_dgSat;
 
 // SECTION: Drop Shadow
 /**
- * The simplest reading of a shadow: a blurred black disc sitting behind the
- * ball, independent of the light rig — no sweep, no clocks. The wall just
- * darkens beneath it (multiplicatively, so the hue stays and nothing goes
- * grey). 0 = off.
+ * The simplest reading of a shadow: a blurred disc sitting behind the ball,
+ * darkening the wall beneath it. It sits BELOW the glow — the halo and
+ * additive glow stack on top and shine over it, never shaded by it. 0 = off.
  * @label Opacity
  * @default 0
  * @range 0, 1
@@ -851,6 +850,23 @@ void main() {
   glowLit *= 1.0 + trk * sGlowTrk;
   glowLit = max(glowLit, vec3(u_glowFloor));
   vec3 halo = glow * glowLit * (u_bloom * 1.3 + 0.5 * u_emissive) * u_glowIntensity;
+  // Drop Shadow (below the glow): the disc darkens the wall BEFORE the halo
+  // stacks on, so the glow shines over the shadow instead of being shaded by
+  // it. Sway throws the disc away from the sweeping light on its own delayed
+  // clock around the static offsets; the blur grades from crisp at the
+  // ball's seam to melted far away. The key dye follows in the colour stage.
+  float dsScroll = scroll + u_dropSwayLag * period;
+  float dsNx = u_ballX / aspect;
+  float dsSo = min(0.5, period * 0.25);
+  float dsDir = stripeField(dsNx + dsSo, dsScroll, period, soft, u_stripeBalance)
+              - stripeField(dsNx - dsSo, dsScroll, period, soft, u_stripeBalance);
+  vec2 dropC = c - vec2(u_dropX - u_dropSway * dsDir * 0.9, u_dropY) * R;
+  float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
+  float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
+  float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
+  float dropB = max(u_dropBlur * dropGrade, 0.01);
+  float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
+  tBg *= 1.0 - dropMask;
   tBg += halo;
   // Capture the corona/halo brightness as the additive glow's source — it is
   // stacked back into the illumination just before the ceiling below.
@@ -895,31 +911,12 @@ void main() {
   vec3 dgKeyHsv = rgb2hsv(u_key);
   vec3 dgDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), 0.32)));
   bgCol = mix(bgCol, dgDye, dark * u_dgSat * 0.55);
-  // Drop Shadow: a blurred disc behind the ball. Sway throws it away from
-  // the sweeping light (on its own delayed clock) around the static offsets,
-  // easing through centre as the light passes head-on. It darkens
-  // multiplicatively, then Saturation/Tint Brightness dye it with the key
-  // hue so it reads as tinted shade, not soot.
-  float dsScroll = scroll + u_dropSwayLag * period;
-  float dsNx = u_ballX / aspect;
-  float dsSo = min(0.5, period * 0.25);
-  float dsDir = stripeField(dsNx + dsSo, dsScroll, period, soft, u_stripeBalance)
-              - stripeField(dsNx - dsSo, dsScroll, period, soft, u_stripeBalance);
-  vec2 dropC = c - vec2(u_dropX - u_dropSway * dsDir * 0.9, u_dropY) * R;
-  float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
-  // Progressive blur: the edge stays crisp where it hugs the ball's
-  // silhouette and melts with distance from it — a contact shadow diffusing
-  // away from its caster. Blur Progression blends uniform ↔ fully graded.
-  float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
-  float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
-  float dropB = max(u_dropBlur * dropGrade, 0.01);
-  float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
-  // Colour: Saturation crossfades the shade itself from plain darkening to
-  // the key dye — at 1 the disc IS saturated key shade, not black with a
-  // tint over it.
+  // Drop Shadow dye (below the glow): tint the shadowed disc toward the key
+  // shade, fading out where the halo is strong so the glow reads on top of
+  // the shadow, never under it. The darkening itself already happened in
+  // illumination space, before the halo was stacked.
   vec3 dropDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), mix(0.08, 0.7, u_dropVal))));
-  vec3 dropShaded = bgCol * (1.0 - dropMask);
-  bgCol = mix(dropShaded, mix(dropShaded, dropDye, dropMask), u_dropSat);
+  bgCol = mix(bgCol, dropDye, dropMask * u_dropSat * exp(-glowOut * 3.0));
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
