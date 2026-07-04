@@ -550,6 +550,18 @@ uniform float u_dropBlur;
 
 // SECTION: Drop Shadow
 /**
+ * Makes the blur progressive with distance from the ball: where the disc's
+ * edge hugs the silhouette it stays crisp (a contact shadow), and it melts
+ * more the farther it reaches — like a real shadow diffusing away from its
+ * caster. 0 = uniform blur everywhere.
+ * @label Blur Progression
+ * @default 0.65
+ * @range 0, 1
+ */
+uniform float u_dropBlurProg;
+
+// SECTION: Drop Shadow
+/**
  * Horizontal offset of the disc from the ball's centre, in ball radii —
  * slide it out to one side like a classic cast drop shadow.
  * @label Offset X
@@ -895,11 +907,19 @@ void main() {
               - stripeField(dsNx - dsSo, dsScroll, period, soft, u_stripeBalance);
   vec2 dropC = c - vec2(u_dropX - u_dropSway * dsDir * 0.9, u_dropY) * R;
   float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
-  float dropB = max(u_dropBlur, 0.01);
+  // Progressive blur: the edge stays crisp where it hugs the ball's
+  // silhouette and melts with distance from it — a contact shadow diffusing
+  // away from its caster. Blur Progression blends uniform ↔ fully graded.
+  float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
+  float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
+  float dropB = max(u_dropBlur * dropGrade, 0.01);
   float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
-  bgCol *= 1.0 - dropMask;
-  vec3 dropDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), mix(0.06, 0.5, u_dropVal))));
-  bgCol = mix(bgCol, dropDye, dropMask * u_dropSat);
+  // Colour: Saturation crossfades the shade itself from plain darkening to
+  // the key dye — at 1 the disc IS saturated key shade, not black with a
+  // tint over it.
+  vec3 dropDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), mix(0.08, 0.7, u_dropVal))));
+  vec3 dropShaded = bgCol * (1.0 - dropMask);
+  bgCol = mix(dropShaded, mix(dropShaded, dropDye, dropMask), u_dropSat);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
