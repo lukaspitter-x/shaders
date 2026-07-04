@@ -568,6 +568,51 @@ uniform float u_dropX;
  */
 uniform float u_dropY;
 
+// SECTION: Drop Shadow
+/**
+ * Slides the disc with the light stripes: it is thrown AWAY from the
+ * sweeping light like a real cast shadow, easing through centre as the
+ * light passes head-on. Stacks on top of the static offsets — those set the
+ * disc's home, this animates around it. 0 = static.
+ * @label Sway
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_dropSway;
+
+// SECTION: Drop Shadow
+/**
+ * Time-shifts the disc's sway off the backdrop clock, as a fraction of the
+ * loop — positive trails the stripes like a shadow with inertia, negative
+ * anticipates them.
+ * @label Sway Delay
+ * @default 0
+ * @range -0.5, 0.5
+ */
+uniform float u_dropSwayLag;
+
+// SECTION: Drop Shadow
+/**
+ * Dyes the disc with the Key Color's hue instead of leaving it a plain
+ * black layer — 0 = pure darkening, 1 = a fully key-saturated shade. A
+ * neutral key stays neutral.
+ * @label Saturation
+ * @default 0.6
+ * @range 0, 1
+ */
+uniform float u_dropSat;
+
+// SECTION: Drop Shadow
+/**
+ * Brightness of the disc's key dye — low keeps it a deep inky tint, high
+ * lifts it toward a luminous colored shade that visibly carries the hue
+ * against the backdrop.
+ * @label Tint Brightness
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_dropVal;
+
 
 vec3 toLinear(vec3 c) {
   return pow(c, vec3(2.2));
@@ -838,13 +883,23 @@ void main() {
   vec3 dgKeyHsv = rgb2hsv(u_key);
   vec3 dgDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), 0.32)));
   bgCol = mix(bgCol, dgDye, dark * u_dgSat * 0.55);
-  // Drop Shadow: a blurred black disc behind the ball — static, honest, no
-  // clocks. Multiplicative darkening keeps the wall's hue under it.
-  vec2 dropC = c - vec2(u_dropX, u_dropY) * R;
+  // Drop Shadow: a blurred disc behind the ball. Sway throws it away from
+  // the sweeping light (on its own delayed clock) around the static offsets,
+  // easing through centre as the light passes head-on. It darkens
+  // multiplicatively, then Saturation/Tint Brightness dye it with the key
+  // hue so it reads as tinted shade, not soot.
+  float dsScroll = scroll + u_dropSwayLag * period;
+  float dsNx = u_ballX / aspect;
+  float dsSo = min(0.5, period * 0.25);
+  float dsDir = stripeField(dsNx + dsSo, dsScroll, period, soft, u_stripeBalance)
+              - stripeField(dsNx - dsSo, dsScroll, period, soft, u_stripeBalance);
+  vec2 dropC = c - vec2(u_dropX - u_dropSway * dsDir * 0.9, u_dropY) * R;
   float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
   float dropB = max(u_dropBlur, 0.01);
-  float dropMask = 1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD);
-  bgCol *= 1.0 - u_dropAmount * dropMask;
+  float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
+  bgCol *= 1.0 - dropMask;
+  vec3 dropDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), mix(0.06, 0.5, u_dropVal))));
+  bgCol = mix(bgCol, dropDye, dropMask * u_dropSat);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
