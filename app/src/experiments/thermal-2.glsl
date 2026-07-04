@@ -284,6 +284,29 @@ uniform float u_emissive;
 
 // SECTION: Effects
 /**
+ * A static rim light filling the ball's edge evenly all the way around —
+ * independent of the stripes, the sweep and Light Tracking. A constant
+ * backlight that keeps the silhouette seated even when the corona lobe is
+ * off elsewhere. 0 = off.
+ * @label Rim Fill
+ * @default 0
+ * @range 0, 2
+ */
+uniform float u_rimFill;
+
+// SECTION: Effects
+/**
+ * How far inward from the silhouette the static Rim Fill reaches — a thin
+ * edge liner vs a broad fill bleeding toward the centre (the Dark Core still
+ * carves the middle).
+ * @label Rim Fill Width
+ * @default 0.4
+ * @range 0, 1
+ */
+uniform float u_rimFillWidth;
+
+// SECTION: Effects
+/**
  * Fake bloom: the Diffuse Scatter mirrored outward onto the wall — crisp at the
  * silhouette, diffusing progressively as it spreads. Higher = a wider, softer
  * glow that reaches farther and blurs more toward its outer edge. The master
@@ -853,6 +876,11 @@ void main() {
 
   // --- Ball illumination level (rim only; center → 0 → shadow color) ---
   vec3 tBall = (rimBase * ballLit + u_emissive * rimF) * u_coronaIntensity;
+  // Static Rim Fill: an even, stripe-independent backlight on the edge, with
+  // its own width — added outside the corona chain so Light Tracking and
+  // Corona Intensity never touch it. The Dark Core below still carves it.
+  float fillF = pow(rimCoord, mix(10.0, 1.5, clamp(u_rimFillWidth, 0.0, 1.0)));
+  tBall += vec3(u_rimFill * fillF);
   // Opposite fresnel: carve a dark core out of the viewer-facing centre (high z).
   float coreMask = smoothstep(1.0 - u_darkCore, 1.0, z); // 1 at centre → 0 at rim
   tBall *= 1.0 - coreMask;
