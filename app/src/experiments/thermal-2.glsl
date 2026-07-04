@@ -462,6 +462,17 @@ uniform float u_dgAmount;
 
 // SECTION: Dark Glow
 /**
+ * How hard the wave dims the wall beneath it — the raw absorption depth,
+ * independent of Amount (which sets the wave's overall presence). Crank both
+ * for a wave that swallows the backdrop almost to black.
+ * @label Darkness
+ * @default 0.7
+ * @range 0, 1
+ */
+uniform float u_dgDarkness;
+
+// SECTION: Dark Glow
+/**
  * Reach of the dark glow across the wall — a tight dark aura at the seam vs
  * a deep wave rolling far from the ball.
  * @label Spread
@@ -496,13 +507,37 @@ uniform float u_dgDelay;
 // SECTION: Dark Glow
 /**
  * How much the absorbed light densifies in colour — the darkened wall is
- * pushed toward a deeper, juicier version of its own hue (always in the key
- * family, never grey). 0 = the dark glow only dims.
+ * pushed toward a deeper, juicier version of its own hue AND dyed with a
+ * deep vivid key tone, which keeps the wave visible even over the dark
+ * bands where pure dimming would vanish. 0 = the dark glow only dims.
  * @label Saturation
  * @default 0.7
  * @range 0, 1
  */
 uniform float u_dgSat;
+
+// SECTION: Dark Glow
+/**
+ * Slides the wave's centre off the ball, driven by the delayed stripes — the
+ * dark dome leans toward wherever its chased light lobe sits, circling the
+ * seam as the loop runs instead of sitting concentric (and invisible) under
+ * the corona. The offset is fully animated; this sets its amplitude.
+ * @label Drift
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_dgDrift;
+
+// SECTION: Dark Glow
+/**
+ * Staggered echoes of the wave — up to two extra passes, each further
+ * delayed behind the main one and slid further out, like ripples of dense
+ * air trailing the light. 0 = single wave; higher = the echoes gain weight.
+ * @label Layers
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_dgLayers;
 
 
 vec3 toLinear(vec3 c) {
@@ -737,16 +772,35 @@ void main() {
   float glowOut = dot(halo, vec3(0.3333));
 
   // --- Dark Glow footprint: the bright glow's dark twin, trailing it ---
-  // Same dome mechanics and stripe tracking as the glow, on its own delayed
-  // clock (offset from the GLOW's clock, so it literally follows the bright
-  // lobe). Only the footprint is computed here — the darkening + densification
-  // happens in the colour stage, so the texture underneath survives.
-  float dgDome = mirrorDome(r, (0.1 + 1.4 * u_dgSpread) * atmos, mix(3.5, 0.5, u_dgCurve));
-  float dgScroll = glowScroll + u_dgDelay * period;
-  float sDark = stripeField(bx, dgScroll, period, soft, u_stripeBalance);
-  float sDarkTrk = mix(sDark, smoothstep(0.15, 0.85, sDark), trk);
-  float dgLit = ambFloor + (1.0 - ambFloor) * sDarkTrk;
-  float dark = clamp(dgDome * dgLit * u_dgAmount * 1.4, 0.0, 1.0);
+  // Same dome mechanics and stripe tracking as the glow, on a clock offset
+  // from the GLOW's (Delay), so the dark wave chases the bright one. The
+  // dome's centre is NOT pinned to the ball: Drift slides it sideways, driven
+  // by each layer's delayed stripe gradient, so the wave reads as its own
+  // body circling the seam instead of hiding under the corona — and Layers
+  // adds staggered echoes, each further delayed and slid further out. Only
+  // the footprint accumulates here; the colour stage darkens + densifies.
+  float dgW = (0.1 + 1.4 * u_dgSpread) * atmos;
+  float dgExpo = mix(3.5, 0.5, u_dgCurve);
+  float dgCenterNx = u_ballX / aspect;
+  float dgSo = min(0.5, period * 0.25);
+  float dark = 0.0;
+  float dgWgt = 1.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float scr = glowScroll + u_dgDelay * period * (1.0 + 0.8 * fi);
+    // Signed direction of this layer's (delayed) light at the ball — the dome
+    // centre slides toward where its chased lobe sits, so the slide is fully
+    // animated by the stripes.
+    float dgDir = stripeField(dgCenterNx + dgSo, scr, period, soft, u_stripeBalance)
+                - stripeField(dgCenterNx - dgSo, scr, period, soft, u_stripeBalance);
+    vec2 dgC = c - vec2(u_dgDrift * (0.7 + 0.5 * fi) * dgDir * R, 0.0);
+    float dome = mirrorDome(length(dgC) / R, dgW, dgExpo);
+    float sD = stripeField(bx, scr, period, soft, u_stripeBalance);
+    float sDT = mix(sD, smoothstep(0.15, 0.85, sD), trk);
+    dark += dgWgt * dome * (ambFloor + (1.0 - ambFloor) * sDT);
+    dgWgt *= clamp(u_dgLayers, 0.0, 1.0);
+  }
+  dark = clamp(dark * u_dgAmount * 1.6, 0.0, 1.0);
 
   // Additive glow: stack the light-leak in ILLUMINATION space, before the
   // ceiling — it overdrives the hottest spots like a real leak, but the same
@@ -763,13 +817,18 @@ void main() {
   // --- Shade both through the ONE palette ---
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
-  // Dark Glow colour treatment: absorb — dim the wall where the dark lobe
-  // sits — then densify what remains by pushing it away from its own grey, so
-  // the trailing wave reads darker AND more saturated, never a grey shadow.
-  bgCol *= 1.0 - 0.65 * dark;
+  // Dark Glow colour treatment, three passes: absorb (Darkness dims the wall
+  // under the wave), densify what remains away from its own grey, then dye
+  // toward a deep vivid key tone — the dye is what keeps the wave visible
+  // even over the already-dark bands, where pure dimming would vanish.
+  // Darker AND more saturated everywhere, never grey, never lost.
+  bgCol *= 1.0 - 0.95 * u_dgDarkness * dark;
   float dgLuma = dot(bgCol, vec3(0.2126, 0.7152, 0.0722));
   vec3 dgDense = max(mix(vec3(dgLuma), bgCol, 1.0 + 1.5 * u_dgSat), 0.0);
   bgCol = mix(bgCol, dgDense, dark);
+  vec3 dgKeyHsv = rgb2hsv(u_key);
+  vec3 dgDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), 0.32)));
+  bgCol = mix(bgCol, dgDye, dark * u_dgSat * 0.55);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
