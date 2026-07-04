@@ -581,11 +581,12 @@ uniform float u_dropY;
 
 // SECTION: Drop Shadow
 /**
- * Width of the shadow wave's travel. The disc rides the light grating in ONE
- * direction — each passing band carries a shadow wave across the ball
- * right→left with the stripes, fading out at the hand-off so the next wave
- * enters seamlessly. Never swings back. Offset X/Y set the wave's home line.
- * 0 = static disc.
+ * Width of the shadow waves' travel. TWO discs ride the light grating in ONE
+ * direction, half a period apart — while one fades out at the end of its
+ * right→left run, the other is already fading in on the far side, so the
+ * shadow never pops or swings back, it hands over in overlapping waves. The
+ * first wave peaks as a dark band crosses the ball. Offset X/Y set the home
+ * line. 0 = one static disc.
  * @label Sway
  * @default 0.5
  * @range 0, 1
@@ -858,20 +859,27 @@ void main() {
   // ball's seam to melted far away. The key dye follows in the colour stage.
   float dsScroll = scroll + u_dropSwayLag * period;
   float dsNx = u_ballX / aspect;
-  // One-way waves: the disc rides the grating's own phase, so it travels
-  // right→left with the stripes — one shadow wave per band — and its
-  // presence fades to zero at the wrap so the next wave hands over without
-  // a pop or a reverse swing.
+  // One-way waves, TWIN discs: both ride the grating's phase right→left with
+  // the stripes, half a period apart — while one fades out at the end of its
+  // travel, its partner is already fading in on the other side, so shadow
+  // presence never pops or swings back. The first wave peaks as a DARK band
+  // crosses the ball; the pair is combined as a union so the mid-crossfade
+  // overlap never darkens twice.
   float dsPh = fract((dsNx + dsScroll) / period);
-  float dsPos = (0.5 - dsPh) * 2.0;
-  float dsEnv = sin(3.14159265 * dsPh);
-  vec2 dropC = c - vec2(u_dropX + u_dropSway * dsPos * 1.2, u_dropY) * R;
-  float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
+  float dsPh2 = fract(dsPh + 0.5);
   float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
   float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
   float dropB = max(u_dropBlur * dropGrade, 0.01);
-  float dropMask = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD)) * u_dropAmount;
-  dropMask *= mix(1.0, dsEnv, clamp(u_dropSway * 2.0, 0.0, 1.0));
+  float dsEng = clamp(u_dropSway * 2.0, 0.0, 1.0);
+  vec2 dropC1 = c - vec2(u_dropX + u_dropSway * (0.5 - dsPh) * 2.4, u_dropY) * R;
+  float dropD1 = length(dropC1) / max(R * u_dropSize, 1.0e-4);
+  float dropM1 = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD1))
+               * mix(1.0, sin(3.14159265 * dsPh), dsEng);
+  vec2 dropC2 = c - vec2(u_dropX + u_dropSway * (0.5 - dsPh2) * 2.4, u_dropY) * R;
+  float dropD2 = length(dropC2) / max(R * u_dropSize, 1.0e-4);
+  float dropM2 = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD2))
+               * mix(1.0, sin(3.14159265 * dsPh2), dsEng);
+  float dropMask = (1.0 - (1.0 - dropM1) * (1.0 - dropM2)) * u_dropAmount;
   tBg *= 1.0 - dropMask;
   tBg += halo;
   // Capture the corona/halo brightness as the additive glow's source — it is
