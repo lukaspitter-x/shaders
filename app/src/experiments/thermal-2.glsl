@@ -55,7 +55,7 @@ uniform float u_hueSpread;
 
 // SECTION: Color
 /**
- * Hue drift of the SHADOW tones (dark bands, dim rim, cast shadow) — same
+ * Hue drift of the SHADOW tones (dark bands, dim rim, dark glow) — same
  * signed scale as Hue Lit. Give it the opposite sign for a classic
  * warm-light/cool-shadow split, or the same sign to push the whole gradient
  * one way.
@@ -167,7 +167,7 @@ uniform float u_loopDur;
 /**
  * Width of each band in the light grating. Light and dark bands are always equal
  * width; this sets how wide they are — small = many thin stripes, large = a few
- * wide ones. They all march right→left, driving wall, rim and shadows together.
+ * wide ones. They all march right→left, driving wall, rim and glows together.
  * @label Stripe Width
  * @default 0.5
  * @range 0.05, 1.5
@@ -198,8 +198,8 @@ uniform float u_stripeBalance;
 // SECTION: Light
 /**
  * Time-shifts the ball's OWN surface lighting out of sync with the backdrop, as a
- * fraction of the loop. The stripes and the cast shadow stay on the backdrop
- * clock; only the ball's rim/corona lead or lag. 0 = in sync; positive = the ball
+ * fraction of the loop. The stripes stay on the backdrop clock; only the ball's
+ * rim/corona lead or lag. 0 = in sync; positive = the ball
  * lights up later than the backdrop, negative = earlier.
  * @label Ball Light Delay
  * @default 0
@@ -429,181 +429,12 @@ uniform float u_coreBlack;
 
 // SECTION: Effects
 /**
- * Strength of the shadow the ball casts on the wall — a directional lobe thrown
- * away from the lit side, plus a faint seam AO. Softness with distance is set by
- * Depth Blur.
- * @label Cast Shadow
- * @default 0.5
- * @range 0, 1
- */
-uniform float u_contact;
-
-// SECTION: Effects
-/**
- * A second cast shadow thrown to the OPPOSITE side of the ball from the first,
- * with its own strength — as if a fill light sat on the far side. 0 = off.
- * @label Second Shadow
- * @default 0.3
- * @range 0, 1
- */
-uniform float u_shadow2;
-
-// SECTION: Effects
-/**
- * How far the shadow leans to the side as the softbox sweeps — the intensity of
- * its movement. Low keeps it centred and gentle (it barely follows the light);
- * high makes it swing decisively with the backdrop gradient.
- * @label Shadow Sway
- * @default 1
- * @range 0, 2
- */
-uniform float u_shadowSway;
-
-// SECTION: Effects
-/**
- * Time-shifts the shadows' response to the stripes, as a fraction of the loop —
- * they trail (positive) or lead (negative) the sweep, like the glow's Glow
- * Delay. 0 = locked to the backdrop clock (classic).
- * @label Shadow Delay
- * @default 0
- * @range -0.5, 0.5
- */
-uniform float u_shadowLag;
-
-// SECTION: Effects
-/**
- * Breathes the shadows' strength with the light actually hitting the ball —
- * no light, no shadow. 0 = constant strength (classic, only the direction
- * sways); 1 = the shadows fully surge as a light band crosses the ball and
- * dissolve while a dark band covers it, in lockstep with the stripes.
- * @label Shadow Sync
- * @default 0
- * @range 0, 1
- */
-uniform float u_shadowSync;
-
-// SECTION: Effects
-/**
- * Rotates the axis the shadow pair is thrown along, in half-turns. 0 = the
- * classic horizontal throw that follows the light sweep; 0.5 swings it
- * vertical (primary shadow downward when the light tops the ball); small
- * values give a diagonal drop like a raked key light.
- * @label Shadow Angle
- * @default 0
- * @range -1, 1
- */
-uniform float u_shadowAngle;
-
-// SECTION: Effects
-/**
- * Angular width of each shadow lobe — how far around the ball it wraps. Low
- * pinches it into a narrow directional wedge; high wraps it into a broad
- * crescent that hugs most of the silhouette.
- * @label Shadow Arc
- * @default 0.5
- * @range 0, 1
- */
-uniform float u_shadowArc;
-
-// SECTION: Effects
-/**
- * Reach of the cast shadows, independent of their strength — a multiplier on
- * both shadows' footprints. 1 = tied to each shadow's strength as before;
- * lower tucks them against the seam, higher throws them far across the wall.
- * @label Shadow Spread
- * @default 1
- * @range 0.25, 2
- */
-uniform float u_shadowSpread;
-
-// SECTION: Effects
-/**
- * Progressiveness of the shadows' falloff across their reach. Low = dense at
- * the seam, dropping off steeply into a faint tail; high = an even, penumbra-
- * like shade that stays strong across its full footprint before letting go.
- * 0.5 is the classic dome falloff.
- * @label Shadow Curve
- * @default 0.5
- * @range 0, 1
- */
-uniform float u_shadowCurve;
-
-// SECTION: Effects
-/**
- * Opacity of the shadow dye — how much the shadowed wall is pulled toward the
- * key-hued tint instead of the palette's muted near-black. Set the dye's
- * character with Tint Saturation and Tint Brightness below. 0 = classic tonal
- * darkening only.
- * @label Shadow Tint
- * @default 0
- * @range 0, 1
- */
-uniform float u_shadowTint;
-
-// SECTION: Effects
-/**
- * Saturation of the shadow dye. Scaled by the Key Color's own saturation (a
- * neutral key keeps neutral shadows), so 1 = as vivid as the key allows and
- * low washes the dye toward smoke.
- * @label Tint Saturation
- * @default 0.85
- * @range 0, 1
- */
-uniform float u_shadowTintSat;
-
-// SECTION: Effects
-/**
- * Brightness of the shadow dye — the juice lever. Low = deep inky shade that
- * reads nearly black; high = a luminous colored shadow that visibly carries
- * the key hue against the backdrop, more a colored gel than a shadow.
- * @label Tint Brightness
- * @default 0.35
- * @range 0, 1
- */
-uniform float u_shadowTintVal;
-
-// SECTION: Effects
-/**
  * Ambient fill so the shadow side never drops fully to black.
  * @label Ambient
  * @default 0.18
  * @range 0, 1
  */
 uniform float u_ambient;
-
-// SECTION: Effects
-/**
- * A volumetric fog shell around the ball — the opposite of the glow. Light
- * passing near the silhouette is absorbed: it goes a touch darker and its
- * colour densifies, while the stripes, glow and shadows underneath keep
- * their texture (nothing is painted over). Wraps the whole ball,
- * independent of the sweep.
- * @label Fog Density
- * @default 0
- * @range 0, 1
- */
-uniform float u_fogDensity;
-
-// SECTION: Effects
-/**
- * Reach of the fog shell — a thin film hugging the silhouette vs a deep
- * volume breathing far around the ball.
- * @label Fog Spread
- * @default 0.35
- * @range 0, 1
- */
-uniform float u_fogSpread;
-
-// SECTION: Effects
-/**
- * How much the fogged light densifies in colour — saturation pushed toward a
- * deeper, juicier version of whatever hue is already there (so it stays in
- * the key family by construction). 0 = the fog only dims.
- * @label Fog Saturation
- * @default 0.6
- * @range 0, 1
- */
-uniform float u_fogSat;
 
 // SECTION: Effects
 /**
@@ -616,6 +447,63 @@ uniform float u_fogSat;
  * @range 0, 1
  */
 uniform float u_depthBlur;
+
+// SECTION: Dark Glow
+/**
+ * The bright glow's dark twin: a lobe that follows the glow around the ball
+ * on its own delayed clock and ABSORBS wall light instead of adding it — the
+ * backdrop under it goes darker and more saturated, a dense wave trailing
+ * the bright one. 0 = off.
+ * @label Amount
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_dgAmount;
+
+// SECTION: Dark Glow
+/**
+ * Reach of the dark glow across the wall — a tight dark aura at the seam vs
+ * a deep wave rolling far from the ball.
+ * @label Spread
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_dgSpread;
+
+// SECTION: Dark Glow
+/**
+ * Progressiveness of the falloff, matching Glow Curve: low = dense at the
+ * seam dropping into a long faint tail, high = an even shade across the full
+ * footprint. 0.5 = the classic dome.
+ * @label Curve
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_dgCurve;
+
+// SECTION: Dark Glow
+/**
+ * How far behind the bright glow the dark one trails, as a fraction of the
+ * loop. Positive = it chases the light (an after-wave); negative = it runs
+ * ahead of it; 0 = right on top of the glow, cancelling it into a dim dense
+ * aura.
+ * @label Delay
+ * @default 0.15
+ * @range -0.5, 0.5
+ */
+uniform float u_dgDelay;
+
+// SECTION: Dark Glow
+/**
+ * How much the absorbed light densifies in colour — the darkened wall is
+ * pushed toward a deeper, juicier version of its own hue (always in the key
+ * family, never grey). 0 = the dark glow only dims.
+ * @label Saturation
+ * @default 0.7
+ * @range 0, 1
+ */
+uniform float u_dgSat;
+
 
 vec3 toLinear(vec3 c) {
   return pow(c, vec3(2.2));
@@ -706,10 +594,10 @@ float blurStripe(float x, float scroll, float period, float soft, float balance,
 
 // The sphere's scatter dome reflected across the silhouette onto the wall: crisp
 // at the edge (r=1) and diffusing progressively softer to nothing at r=1+width —
-// the mirror of the ball's inward Diffuse Scatter. Used for BOTH the outward
-// bloom and the cast shadow, so each is least blurred at the seam, blurrier out.
+// the mirror of the ball's inward Diffuse Scatter. Used for BOTH the bright
+// glow and the Dark Glow, so each is least blurred at the seam, blurrier out.
 // `expo` shapes the falloff: high hugs the seam and tails off fast, low spreads
-// an even plateau across the full width. Shadows use the classic 2.0.
+// an even plateau across the full width.
 float mirrorDome(float r, float width, float expo) {
   float d = clamp((r - 1.0) / max(width, 1.0e-3), 0.0, 1.0);
   float zMir = sqrt(max(1.0 - (1.0 - d) * (1.0 - d), 0.0));
@@ -824,7 +712,7 @@ void main() {
   // softer/more diffuse outward — so the glow is least blurred nearest the ball
   // and blurrier the farther it reaches. Bloom sets the reach: a small glow stays
   // tight (little blur), a large one diffuses far (more blur).
-  float atmos = mix(0.7, 1.5, u_depthBlur);   // Depth Blur scales how far glow/shadow reach
+  float atmos = mix(0.7, 1.5, u_depthBlur);   // Depth Blur scales how far glow/dark-glow reach
   float glowW = (0.25 + 1.5 * u_bloom) * atmos * u_glowSpread;
   float glow = mirrorDome(r, glowW, mix(3.5, 0.5, u_glowCurve));
   // The halo reads the grating on its OWN clock (Glow Delay shifts it off the
@@ -848,53 +736,17 @@ void main() {
   float glowIn = dot(tBall, vec3(0.3333));
   float glowOut = dot(halo, vec3(0.3333));
 
-  // --- Cast shadow on the wall (the shadow half of the pair) ---
-  // The ball blocks the softbox, darkening the wall AWAY from the lit side. Find
-  // the light's horizontal direction from the stripe gradient at the ball, then
-  // darken the wall where it faces away from the light, fading out from the seam.
-  // Depth Blur sets how far and how softly the shadow reaches — crisp and tight
-  // at low blur, long and diffuse at high blur (an area-light penumbra).
-  float ballCenterNx = u_ballX / aspect;
-  float so = min(0.5, period * 0.25);   // sample the gradient across the nearest band
-  // The shadows read the grating on their own clock: base is the backdrop scroll
-  // (so Ball Light Delay offsets only the ball's surface lighting), and Shadow
-  // Delay shifts them off it to trail or lead the sweep.
-  float shadowScroll = scroll + u_shadowLag * period;
-  float sLeft = stripeField(ballCenterNx - so, shadowScroll, period, soft, u_stripeBalance);
-  float sRight = stripeField(ballCenterNx + so, shadowScroll, period, soft, u_stripeBalance);
-  // Smooth SIGNED light direction from the stripe gradient at the ball — NOT
-  // normalized, so as the softbox sweeps the value eases through zero and the
-  // shadow slides gently across instead of snapping between sides. Its magnitude
-  // fades the shadow out near head-on, when there is no clear dark side.
-  float lightX = sRight - sLeft;                             // smooth signed light direction
-  // Shadow Angle rotates the axis the pair is thrown along — 0 keeps the classic
-  // horizontal throw, other angles let the shadows drop diagonally or vertically
-  // while still swaying with the sweep.
-  float sAng = u_shadowAngle * 3.14159265;
-  vec2 sAxis = vec2(cos(sAng), sin(sAng));
-  float lean = -dot(outward, sAxis) * lightX * u_shadowSway * 2.0; // >0 on the far (shadow) side
-  // Angular lobe: smoothstep keeps the response easing gently through zero (the
-  // shadow dwells as the light passes head-on instead of hurrying across), and
-  // Shadow Arc's exponent sets how wide the lobe wraps — high exponent pinches a
-  // narrow wedge, low wraps a broad crescent.
-  float wedgeExp = mix(4.0, 0.5, clamp(u_shadowArc, 0.0, 1.0));
-  float dirAway = pow(smoothstep(0.0, 1.0, clamp(lean, 0.0, 1.0)), wedgeExp);
-  float dirToward = pow(smoothstep(0.0, 1.0, clamp(-lean, 0.0, 1.0)), wedgeExp);
-  // Two mirrored-dome shadows — the primary away from the light, a second one the
-  // opposite way. Shadow Spread scales both footprints independent of strength;
-  // Shadow Curve reshapes the radial falloff (dense seam + tail vs even penumbra).
-  float sCurve = mix(3.5, 0.5, clamp(u_shadowCurve, 0.0, 1.0));
-  float dome1 = mirrorDome(r, (0.25 + 1.5 * u_contact) * atmos * u_shadowSpread, sCurve);
-  float dome2 = mirrorDome(r, (0.25 + 1.5 * u_shadow2) * atmos * u_shadowSpread, sCurve);
-  float shadow1 = dome1 * (0.12 + 0.88 * dirAway) * u_contact; // 0.12 floor seats the ball
-  float shadow2 = dome2 * dirToward * u_shadow2;
-  // Shadow Sync: no light, no shadow — scale the strength by the stripe light
-  // actually on the ball (on the shadows' clock), so they surge under a light
-  // band and dissolve under a dark one.
-  float sMid = stripeField(ballCenterNx, shadowScroll, period, soft, u_stripeBalance);
-  float syncMod = mix(1.0, sMid, clamp(u_shadowSync, 0.0, 1.0));
-  float shadowAmt = clamp((shadow1 + shadow2) * 1.7 * syncMod, 0.0, 0.93);
-  tBg = max(tBg * (1.0 - shadowAmt), 0.0);
+  // --- Dark Glow footprint: the bright glow's dark twin, trailing it ---
+  // Same dome mechanics and stripe tracking as the glow, on its own delayed
+  // clock (offset from the GLOW's clock, so it literally follows the bright
+  // lobe). Only the footprint is computed here — the darkening + densification
+  // happens in the colour stage, so the texture underneath survives.
+  float dgDome = mirrorDome(r, (0.1 + 1.4 * u_dgSpread) * atmos, mix(3.5, 0.5, u_dgCurve));
+  float dgScroll = glowScroll + u_dgDelay * period;
+  float sDark = stripeField(bx, dgScroll, period, soft, u_stripeBalance);
+  float sDarkTrk = mix(sDark, smoothstep(0.15, 0.85, sDark), trk);
+  float dgLit = ambFloor + (1.0 - ambFloor) * sDarkTrk;
+  float dark = clamp(dgDome * dgLit * u_dgAmount * 1.4, 0.0, 1.0);
 
   // Additive glow: stack the light-leak in ILLUMINATION space, before the
   // ceiling — it overdrives the hottest spots like a real leak, but the same
@@ -911,28 +763,13 @@ void main() {
   // --- Shade both through the ONE palette ---
   vec3 keyLin = toLinear(u_key);
   vec3 bgCol = shadeRGB(tBg, keyLin);
-  // Shadow Tint: dye the shadowed wall toward a saturated key tone (the
-  // palette's own dark end is low-saturation by design, so a vivid shadow needs
-  // its own dye — Tube's trick). Tint Saturation and Tint Brightness shape the
-  // dye; its saturation is still scaled by the KEY's own (sqrt-boosted), so a
-  // neutral key gets a neutral dye, never an invented hue. The dye is mixed in
-  // BEFORE the hue drift and additive glow, so those keep acting on top of it.
-  vec3 keyHsv = rgb2hsv(u_key);
-  float dyeSat = u_shadowTintSat * sqrt(keyHsv.y);
-  float dyeVal = mix(0.05, 0.7, clamp(u_shadowTintVal, 0.0, 1.0));
-  vec3 shadowDye = toLinear(hsv2rgb(vec3(keyHsv.x, dyeSat, dyeVal)));
-  bgCol = mix(bgCol, shadowDye, u_shadowTint * shadowAmt);
-  // Fog halo: a volumetric absorption shell around the ball — the glow's
-  // opposite. It MODULATES the light already on the wall instead of painting
-  // its own colour: brightness dips (absorption) and the remaining colour is
-  // pushed away from its own grey (densification), so bright stripe light
-  // near the ball turns darker and juicier while all texture survives.
-  float fogDome = mirrorDome(r, (0.08 + 0.9 * u_fogSpread) * atmos, 2.0);
-  float fog = clamp(fogDome * u_fogDensity, 0.0, 1.0);
-  bgCol *= 1.0 - 0.55 * fog;
-  float fogLuma = dot(bgCol, vec3(0.2126, 0.7152, 0.0722));
-  vec3 dense = max(mix(vec3(fogLuma), bgCol, 1.0 + 1.5 * u_fogSat), 0.0);
-  bgCol = mix(bgCol, dense, fog);
+  // Dark Glow colour treatment: absorb — dim the wall where the dark lobe
+  // sits — then densify what remains by pushing it away from its own grey, so
+  // the trailing wave reads darker AND more saturated, never a grey shadow.
+  bgCol *= 1.0 - 0.65 * dark;
+  float dgLuma = dot(bgCol, vec3(0.2126, 0.7152, 0.0722));
+  vec3 dgDense = max(mix(vec3(dgLuma), bgCol, 1.0 + 1.5 * u_dgSat), 0.0);
+  bgCol = mix(bgCol, dgDense, dark);
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
