@@ -581,14 +581,15 @@ uniform float u_dropY;
 
 // SECTION: Drop Shadow
 /**
- * Width of the shadow waves' travel. TWO discs ride the light grating in ONE
- * direction, half a period apart, with complementary fades that always sum
- * to one — each eases fully out before it wraps while its partner eases in
- * on the far side, so the shadow loops seamlessly: no pop, no gap, no
- * backswing, at any value. The first wave peaks as a dark band crosses the
- * ball. Offset X/Y set the home line. 0 = one static disc.
+ * How fast the shadow waves travel, as a fraction of the stripes' own speed.
+ * 1 = LOCKED to the grating — each disc rides its dark band in exact
+ * lockstep across the screen; lower underruns proportionally; 0 = static.
+ * TWO discs run half a period apart with complementary fades that always
+ * sum to one, so the shadow loops seamlessly — no pop, no gap, no backswing.
+ * The first wave peaks as a dark band crosses the ball. Offset X/Y set the
+ * home line.
  * @label Sway
- * @default 0.5
+ * @default 1
  * @range 0, 1
  */
 uniform float u_dropSway;
@@ -904,10 +905,13 @@ void main() {
   float dsE1 = sin(3.14159265 * dsPh);
   dsE1 *= dsE1;
   float dsE2 = 1.0 - dsE1;
-  // Distance Fade: each wave thins as its disc travels away from the ball —
-  // a shadow dissolving as it leaves its caster.
-  vec2 dropOff1 = vec2(u_dropX + u_dropSway * (0.5 - dsPh) * 2.4, u_dropY);
-  vec2 dropOff2 = vec2(u_dropX + u_dropSway * (0.5 - dsPh2) * 2.4, u_dropY);
+  // Band-locked travel: dsSpan is one band-pair's on-screen width in ball
+  // radii, so at Sway 1 the disc moves at EXACTLY the stripes' speed — it
+  // rides its dark band in lockstep instead of sliding against the grating.
+  // Distance Fade then thins each wave as its disc leaves the ball.
+  float dsSpan = period * aspect * 0.5 / R;
+  vec2 dropOff1 = vec2(u_dropX + u_dropSway * (0.5 - dsPh) * dsSpan, u_dropY);
+  vec2 dropOff2 = vec2(u_dropX + u_dropSway * (0.5 - dsPh2) * dsSpan, u_dropY);
   float dropW1 = dsE1 * exp(-dot(dropOff1, dropOff1) * u_dropDistFade * 1.5);
   float dropW2 = dsE2 * exp(-dot(dropOff2, dropOff2) * u_dropDistFade * 1.5);
   // Dispersion: each colour channel reads the discs a hair to the side, so
