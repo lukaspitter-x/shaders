@@ -582,11 +582,11 @@ uniform float u_dropY;
 // SECTION: Drop Shadow
 /**
  * Width of the shadow waves' travel. TWO discs ride the light grating in ONE
- * direction, half a period apart — while one fades out at the end of its
- * right→left run, the other is already fading in on the far side, so the
- * shadow never pops or swings back, it hands over in overlapping waves. The
- * first wave peaks as a dark band crosses the ball. Offset X/Y set the home
- * line. 0 = one static disc.
+ * direction, half a period apart, with complementary fades that always sum
+ * to one — each eases fully out before it wraps while its partner eases in
+ * on the far side, so the shadow loops seamlessly: no pop, no gap, no
+ * backswing, at any value. The first wave peaks as a dark band crosses the
+ * ball. Offset X/Y set the home line. 0 = one static disc.
  * @label Sway
  * @default 0.5
  * @range 0, 1
@@ -603,6 +603,17 @@ uniform float u_dropSway;
  * @range -0.5, 0.5
  */
 uniform float u_dropSwayLag;
+
+// SECTION: Drop Shadow
+/**
+ * Fades the shadow with its distance from the ball — the farther a wave
+ * carries the disc from its caster, the thinner its opacity, dissolving
+ * toward the far end of the travel. 0 = full opacity everywhere.
+ * @label Distance Fade
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_dropDistFade;
 
 // SECTION: Drop Shadow
 /**
@@ -625,6 +636,17 @@ uniform float u_dropSat;
  * @range 0, 1
  */
 uniform float u_dropVal;
+
+// SECTION: Drop Shadow
+/**
+ * Chromatic aberration of the shadow discs — each colour channel reads the
+ * disc a hair to the side, so the blurred edge fringes into colour, matching
+ * the stripe Dispersion's lens character. 0 = clean edge.
+ * @label Dispersion
+ * @default 0.4
+ * @range 0, 1
+ */
+uniform float u_dropDisp;
 
 
 vec3 toLinear(vec3 c) {
@@ -724,6 +746,13 @@ float mirrorDome(float r, float width, float expo) {
   float d = clamp((r - 1.0) / max(width, 1.0e-3), 0.0, 1.0);
   float zMir = sqrt(max(1.0 - (1.0 - d) * (1.0 - d), 0.0));
   return pow(1.0 - zMir, expo) * step(1.0, r);
+}
+
+// A soft-edged disc: 1 inside, easing to 0 across the blur band. Used by the
+// Drop Shadow, evaluated once per colour channel for its dispersion fringe.
+float discMask(vec2 cRel, float radius, float blur) {
+  float d = length(cRel) / radius;
+  return 1.0 - smoothstep(1.0 - blur, 1.0 + 1.5 * blur, d);
 }
 
 // Soft highlight ceiling: near-linear below `ceil`, smoothly saturating toward it
@@ -860,26 +889,42 @@ void main() {
   float dsScroll = scroll + u_dropSwayLag * period;
   float dsNx = u_ballX / aspect;
   // One-way waves, TWIN discs: both ride the grating's phase right→left with
-  // the stripes, half a period apart — while one fades out at the end of its
-  // travel, its partner is already fading in on the other side, so shadow
-  // presence never pops or swings back. The first wave peaks as a DARK band
-  // crosses the ball; the pair is combined as a union so the mid-crossfade
-  // overlap never darkens twice.
+  // the stripes, half a period apart. Their envelopes are exact complements
+  // (sin² + cos² = 1): each disc eases C¹-smoothly to ZERO before its
+  // position wraps (so the jump is always fully hidden — no pop at any Sway
+  // value), one is always fading in while the other fades out, and the two
+  // weights sum to one so total shadow presence never dips or doubles. At
+  // Sway 0 the discs coincide and the pair collapses to one steady disc.
+  // The first wave peaks as a DARK band crosses the ball.
   float dsPh = fract((dsNx + dsScroll) / period);
   float dsPh2 = fract(dsPh + 0.5);
   float dropAway = clamp((r - 1.0) / 1.2, 0.0, 1.0);
   float dropGrade = mix(1.0, mix(0.12, 1.8, dropAway), u_dropBlurProg);
   float dropB = max(u_dropBlur * dropGrade, 0.01);
-  float dsEng = clamp(u_dropSway * 2.0, 0.0, 1.0);
-  vec2 dropC1 = c - vec2(u_dropX + u_dropSway * (0.5 - dsPh) * 2.4, u_dropY) * R;
-  float dropD1 = length(dropC1) / max(R * u_dropSize, 1.0e-4);
-  float dropM1 = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD1))
-               * mix(1.0, sin(3.14159265 * dsPh), dsEng);
-  vec2 dropC2 = c - vec2(u_dropX + u_dropSway * (0.5 - dsPh2) * 2.4, u_dropY) * R;
-  float dropD2 = length(dropC2) / max(R * u_dropSize, 1.0e-4);
-  float dropM2 = (1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD2))
-               * mix(1.0, sin(3.14159265 * dsPh2), dsEng);
-  float dropMask = (1.0 - (1.0 - dropM1) * (1.0 - dropM2)) * u_dropAmount;
+  float dsE1 = sin(3.14159265 * dsPh);
+  dsE1 *= dsE1;
+  float dsE2 = 1.0 - dsE1;
+  // Distance Fade: each wave thins as its disc travels away from the ball —
+  // a shadow dissolving as it leaves its caster.
+  vec2 dropOff1 = vec2(u_dropX + u_dropSway * (0.5 - dsPh) * 2.4, u_dropY);
+  vec2 dropOff2 = vec2(u_dropX + u_dropSway * (0.5 - dsPh2) * 2.4, u_dropY);
+  float dropW1 = dsE1 * exp(-dot(dropOff1, dropOff1) * u_dropDistFade * 1.5);
+  float dropW2 = dsE2 * exp(-dot(dropOff2, dropOff2) * u_dropDistFade * 1.5);
+  // Dispersion: each colour channel reads the discs a hair to the side, so
+  // the blurred edges fringe into colour through the palette.
+  float dsD = u_dropDisp * 0.1 * R;
+  vec2 dropC1 = c - dropOff1 * R;
+  vec2 dropC2 = c - dropOff2 * R;
+  float dropSizeR = max(R * u_dropSize, 1.0e-4);
+  vec3 dropM1 = vec3(
+    discMask(dropC1 - vec2(dsD, 0.0), dropSizeR, dropB),
+    discMask(dropC1, dropSizeR, dropB),
+    discMask(dropC1 + vec2(dsD, 0.0), dropSizeR, dropB));
+  vec3 dropM2 = vec3(
+    discMask(dropC2 - vec2(dsD, 0.0), dropSizeR, dropB),
+    discMask(dropC2, dropSizeR, dropB),
+    discMask(dropC2 + vec2(dsD, 0.0), dropSizeR, dropB));
+  vec3 dropMask = (dropM1 * dropW1 + dropM2 * dropW2) * u_dropAmount;
   tBg *= 1.0 - dropMask;
   tBg += halo;
   // Capture the corona/halo brightness as the additive glow's source — it is
