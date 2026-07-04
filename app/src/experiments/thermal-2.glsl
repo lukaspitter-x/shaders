@@ -516,28 +516,57 @@ uniform float u_dgDelay;
  */
 uniform float u_dgSat;
 
-// SECTION: Dark Glow
+// SECTION: Drop Shadow
 /**
- * Slides the wave's centre off the ball, driven by the delayed stripes — the
- * dark dome leans toward wherever its chased light lobe sits, circling the
- * seam as the loop runs instead of sitting concentric (and invisible) under
- * the corona. The offset is fully animated; this sets its amplitude.
- * @label Drift
+ * The simplest reading of a shadow: a blurred black disc sitting behind the
+ * ball, independent of the light rig — no sweep, no clocks. The wall just
+ * darkens beneath it (multiplicatively, so the hue stays and nothing goes
+ * grey). 0 = off.
+ * @label Opacity
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_dropAmount;
+
+// SECTION: Drop Shadow
+/**
+ * Radius of the disc relative to the ball — 1 hides exactly behind the
+ * silhouette, larger peeks out as a dark aura.
+ * @label Size
+ * @default 1.15
+ * @range 0.4, 2
+ */
+uniform float u_dropSize;
+
+// SECTION: Drop Shadow
+/**
+ * Edge blur of the disc — 0 is a hard-edged circle, 1 melts it into a soft
+ * dark breath with no visible boundary.
+ * @label Blur
  * @default 0.5
  * @range 0, 1
  */
-uniform float u_dgDrift;
+uniform float u_dropBlur;
 
-// SECTION: Dark Glow
+// SECTION: Drop Shadow
 /**
- * Staggered echoes of the wave — up to two extra passes, each further
- * delayed behind the main one and slid further out, like ripples of dense
- * air trailing the light. 0 = single wave; higher = the echoes gain weight.
- * @label Layers
- * @default 0.35
- * @range 0, 1
+ * Horizontal offset of the disc from the ball's centre, in ball radii —
+ * slide it out to one side like a classic cast drop shadow.
+ * @label Offset X
+ * @default 0
+ * @range -1, 1
  */
-uniform float u_dgLayers;
+uniform float u_dropX;
+
+// SECTION: Drop Shadow
+/**
+ * Vertical offset of the disc, in ball radii — negative drops it below the
+ * ball.
+ * @label Offset Y
+ * @default 0
+ * @range -1, 1
+ */
+uniform float u_dropY;
 
 
 vec3 toLinear(vec3 c) {
@@ -773,34 +802,14 @@ void main() {
 
   // --- Dark Glow footprint: the bright glow's dark twin, trailing it ---
   // Same dome mechanics and stripe tracking as the glow, on a clock offset
-  // from the GLOW's (Delay), so the dark wave chases the bright one. The
-  // dome's centre is NOT pinned to the ball: Drift slides it sideways, driven
-  // by each layer's delayed stripe gradient, so the wave reads as its own
-  // body circling the seam instead of hiding under the corona — and Layers
-  // adds staggered echoes, each further delayed and slid further out. Only
-  // the footprint accumulates here; the colour stage darkens + densifies.
-  float dgW = (0.1 + 1.4 * u_dgSpread) * atmos;
-  float dgExpo = mix(3.5, 0.5, u_dgCurve);
-  float dgCenterNx = u_ballX / aspect;
-  float dgSo = min(0.5, period * 0.25);
-  float dark = 0.0;
-  float dgWgt = 1.0;
-  for (int i = 0; i < 3; i++) {
-    float fi = float(i);
-    float scr = glowScroll + u_dgDelay * period * (1.0 + 0.8 * fi);
-    // Signed direction of this layer's (delayed) light at the ball — the dome
-    // centre slides toward where its chased lobe sits, so the slide is fully
-    // animated by the stripes.
-    float dgDir = stripeField(dgCenterNx + dgSo, scr, period, soft, u_stripeBalance)
-                - stripeField(dgCenterNx - dgSo, scr, period, soft, u_stripeBalance);
-    vec2 dgC = c - vec2(u_dgDrift * (0.7 + 0.5 * fi) * dgDir * R, 0.0);
-    float dome = mirrorDome(length(dgC) / R, dgW, dgExpo);
-    float sD = stripeField(bx, scr, period, soft, u_stripeBalance);
-    float sDT = mix(sD, smoothstep(0.15, 0.85, sD), trk);
-    dark += dgWgt * dome * (ambFloor + (1.0 - ambFloor) * sDT);
-    dgWgt *= clamp(u_dgLayers, 0.0, 1.0);
-  }
-  dark = clamp(dark * u_dgAmount * 1.6, 0.0, 1.0);
+  // from the GLOW's (Delay), so the dark wave chases the bright one. Only the
+  // footprint is computed here; the colour stage darkens + densifies.
+  float dgDome = mirrorDome(r, (0.1 + 1.4 * u_dgSpread) * atmos, mix(3.5, 0.5, u_dgCurve));
+  float dgScroll = glowScroll + u_dgDelay * period;
+  float sDark = stripeField(bx, dgScroll, period, soft, u_stripeBalance);
+  float sDarkTrk = mix(sDark, smoothstep(0.15, 0.85, sDark), trk);
+  float dgLit = ambFloor + (1.0 - ambFloor) * sDarkTrk;
+  float dark = clamp(dgDome * dgLit * u_dgAmount * 1.6, 0.0, 1.0);
 
   // Additive glow: stack the light-leak in ILLUMINATION space, before the
   // ceiling — it overdrives the hottest spots like a real leak, but the same
@@ -829,6 +838,13 @@ void main() {
   vec3 dgKeyHsv = rgb2hsv(u_key);
   vec3 dgDye = toLinear(hsv2rgb(vec3(dgKeyHsv.x, sqrt(dgKeyHsv.y), 0.32)));
   bgCol = mix(bgCol, dgDye, dark * u_dgSat * 0.55);
+  // Drop Shadow: a blurred black disc behind the ball — static, honest, no
+  // clocks. Multiplicative darkening keeps the wall's hue under it.
+  vec2 dropC = c - vec2(u_dropX, u_dropY) * R;
+  float dropD = length(dropC) / max(R * u_dropSize, 1.0e-4);
+  float dropB = max(u_dropBlur, 0.01);
+  float dropMask = 1.0 - smoothstep(1.0 - dropB, 1.0 + 1.5 * dropB, dropD);
+  bgCol *= 1.0 - u_dropAmount * dropMask;
   vec3 ballCol = shadeRGB(tBall, keyLin);
   // Core Black: crush the core toward true black, past the palette's tinted floor.
   ballCol *= 1.0 - u_coreBlack * coreMask;
