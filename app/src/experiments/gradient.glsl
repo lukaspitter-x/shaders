@@ -228,6 +228,17 @@ uniform float u_bloom;
 
 // SECTION: Hole
 /**
+ * Vertical stretch of the Bloom dome — how high the blurred light climbs
+ * above the hole, independent of its strength. 1 is the natural dome; 3
+ * sends the shine most of the way up the canvas.
+ * @label Bloom Height
+ * @default 1
+ * @range 0.2, 3
+ */
+uniform float u_bloomH;
+
+// SECTION: Hole
+/**
  * Hotspot at the mouth of the hole — a near-white center-bottom highlight, as
  * if the light source sits just inside the pit and shines out.
  * @label Core Light
@@ -486,7 +497,8 @@ void main() {
       float feather = mix(0.012 + 0.3 * (1.0 - u_edge), 0.18, above);
       float disc = 1.0 - smoothstep(1.0 - feather * 0.25, 1.0 + feather, rr);
 
-      float reach = mix(0.45, 0.6 + 2.6 * u_bloom, smoothstep(-0.1, 0.1, pa.y / scale));
+      float reach =
+          mix(0.45, (0.6 + 2.6 * u_bloom) * u_bloomH, smoothstep(-0.1, 0.1, pa.y / scale));
       vec2 gq = vec2(pa.x / (1.0 + 0.9 * u_bloom), pa.y / reach) / scale;
       float glow = u_bloom * exp(-dot(gq, gq) * 1.8);
 
