@@ -218,6 +218,28 @@ uniform float u_edge;
 
 // SECTION: Hole
 /**
+ * How far the disc's UPPER edge stretches and blurs upward — the melt of the
+ * rim itself, independent of the Bloom dome behind it. Low keeps the top arc
+ * nearly as crisp as the bottom; high smears it far up.
+ * @label Top Fade
+ * @default 0.16
+ * @range 0.02, 8
+ */
+uniform float u_topFade;
+
+// SECTION: Hole
+/**
+ * Horizontal spread of that top melt, as a fraction of the disc radius.
+ * Narrow blurs only the top-center (a column of light escaping); wide melts
+ * the whole upper arc evenly.
+ * @label Top Spread
+ * @default 1
+ * @range 0.1, 3
+ */
+uniform float u_topSpread;
+
+// SECTION: Hole
+/**
  * The dome of light rising above the hole — strength and reach together. High
  * values push a soft cone of glow several radii up into the background.
  * @label Bloom
@@ -494,8 +516,14 @@ void main() {
       vec2 qn = vec2(pa.x, pa.y / sq) / scale;
       float rr = length(qn);
       float above = smoothstep(-0.05, 0.3, pa.y / scale);
-      float feather = mix(0.012 + 0.3 * (1.0 - u_edge), 0.18, above);
-      float disc = 1.0 - smoothstep(1.0 - feather * 0.25, 1.0 + feather, rr);
+      // Where the top melt applies: above the horizon, weighted toward the
+      // top-center by Top Spread (narrow = only the middle of the arc melts).
+      float topW = max(u_topSpread, 0.05);
+      float topMask = above * exp(-(qn.x * qn.x) / (topW * topW));
+      float feather = mix(0.012 + 0.3 * (1.0 - u_edge), 0.04 + u_topFade, topMask);
+      // Inner edge clamped to 0 so extreme Top Fade smears far upward without
+      // hollowing out the disc's bright center.
+      float disc = 1.0 - smoothstep(max(1.0 - feather * 0.25, 0.0), 1.0 + feather, rr);
 
       float reach =
           mix(0.45, (0.6 + 2.6 * u_bloom) * u_bloomH, smoothstep(-0.1, 0.1, pa.y / scale));
