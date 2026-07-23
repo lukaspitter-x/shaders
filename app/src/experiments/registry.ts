@@ -12,6 +12,7 @@
  * time (see `glsl/parse-annotations.ts`).
  */
 import flipPlasmaSource from './flip-plasma.glsl?raw';
+import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
 import mouseGlowSource from './mouse-glow.glsl?raw';
 import softShapeSource from './soft-shape.glsl?raw';
@@ -31,6 +32,7 @@ export interface ShaderExperiment {
 
 export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'flip-plasma', label: 'Flip Plasma', type: 'fill', source: flipPlasmaSource },
+  { id: 'gradient', label: 'Gradient', type: 'fill', source: gradientSource },
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
   { id: 'mouse-glow', label: 'Mouse Glow', type: 'fill', source: mouseGlowSource },
   { id: 'soft-shape', label: 'Soft Shape', type: 'fill', source: softShapeSource },
