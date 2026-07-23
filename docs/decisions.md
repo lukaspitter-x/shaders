@@ -220,6 +220,18 @@ undo history is in-memory only.
   else**. Workbench-only inventions (`@select @switch @step @bezier @envelope`)
   are **unverified** and likely fail on paste; `lint-pencil.ts` now warns
   (`unknown-directive`) on any directive outside the confirmed set.
+- **`@select`/`@switch`/`@step` are EXPORT-DOWNGRADED, so authored shaders may
+  use them freely.** `downgradePencilDirectives` (`strip-annotations.ts`) runs on
+  every export path (`downloadGlsl`) and rewrites: `@select A, B, C` →
+  `@range 0, N-1` plus a Pencil-ignored `// name: 0 A · 1 B …` option-map comment
+  after the uniform; `@switch` → `@range 0, 1` (boolean `@default` numified);
+  `@step` dropped. The workbench panel parses the authored source (rich
+  controls); the lint badge lints the *downgraded* source — i.e. what Pencil
+  actually receives. Shader code must therefore treat a select uniform as a
+  float and round (`floor(u_x + 0.5)`), since in Pencil it arrives as a slider.
+  `sanitizeValues` coerces stale numeric preset values into select option
+  strings (a control that changes kind slider→select would otherwise render a
+  blank dropdown).
 - **Section grouping is a `// SECTION: Name` LINE COMMENT, never `@section`.**
   Pencil ignores line comments entirely (genuine `flip-clouds`/`flip-julia` carry
   `//` comments and load fine), but hard-rejects `@section`. The parser reads the

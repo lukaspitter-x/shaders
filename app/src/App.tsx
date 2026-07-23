@@ -21,7 +21,7 @@ import { ShaderViewport } from '@/render/shader-viewport';
 import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
 import { imageToSdf } from '@/render/image-sdf';
 import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
-import { stripHiddenAnnotations } from '@/glsl/strip-annotations';
+import { downgradePencilDirectives, stripHiddenAnnotations } from '@/glsl/strip-annotations';
 import { usePresets } from '@/presets/use-presets';
 import { PresetSwitcher } from '@/presets/preset-switcher';
 import { EXPERIMENTS } from '@/experiments/registry';
@@ -60,7 +60,12 @@ export default function App() {
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
-  const lint = useMemo(() => (selected ? lintPencil(selected.source) : []), [selected]);
+  // Lint what Pencil will actually receive — the export path downgrades
+  // workbench-only directives (@select/@switch/@step) to paste-safe @range.
+  const lint = useMemo(
+    () => (selected ? lintPencil(downgradePencilDirectives(selected.source)) : []),
+    [selected],
+  );
   const requiresShape = !!parsed?.system.sdf;
 
   const [previewScale, setPreviewScale] = useState<PreviewScale>('full');

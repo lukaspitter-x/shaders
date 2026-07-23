@@ -8,21 +8,25 @@ import { describe, expect, it } from 'vitest';
 import gradientSource from './gradient.glsl?raw';
 import { lintPencil } from '../glsl/lint-pencil';
 import { parseShader } from '../glsl/parse-annotations';
+import { downgradePencilDirectives } from '../glsl/strip-annotations';
 
 describe('gradient.glsl', () => {
-  it('is lint-clean against the Pencil ES 1.00 rules', () => {
-    expect(lintPencil(gradientSource)).toEqual([]);
+  it('exports lint-clean against the Pencil ES 1.00 rules', () => {
+    expect(lintPencil(downgradePencilDirectives(gradientSource))).toEqual([]);
   });
 
-  it('exposes the gradient type as a paste-safe 0–4 slider (no @select)', () => {
-    expect(gradientSource).not.toContain('@select');
-    expect(gradientSource).not.toContain('@switch');
+  it('exposes the five gradient types as a select', () => {
     const { schema } = parseShader(gradientSource);
     const type = schema.find((c) => c.key === 'u_type');
-    expect(type?.kind).toBe('slider');
-    if (type?.kind === 'slider') {
-      expect(type.min).toBe(0);
-      expect(type.max).toBe(4);
+    expect(type?.kind).toBe('select');
+    if (type?.kind === 'select') {
+      expect(type.options.map((o) => o.label)).toEqual([
+        'Linear',
+        'Radial',
+        'Hole',
+        'Mesh',
+        'Sky',
+      ]);
     }
   });
 
@@ -52,7 +56,7 @@ describe('gradient.glsl', () => {
     expect(system.resolution).toBe('u_resolution');
     expect(system.time).toBeUndefined();
     expect(system.sdf).toBeUndefined();
-    expect(defaults.u_type).toBe(0);
+    expect(defaults.u_type).toBe('0');
     expect(typeof defaults.u_key).toBe('string');
   });
 });

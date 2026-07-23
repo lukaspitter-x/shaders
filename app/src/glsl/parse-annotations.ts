@@ -112,6 +112,18 @@ export function sanitizeValues(
 ): ShaderValues {
   const out: ShaderValues = { ...values };
   for (const c of schema) {
+    // Selects store option-value STRINGS; a stale value from before a control
+    // changed kind (e.g. slider → select) arrives numeric. Coerce by rounding
+    // and clamping into the option list so the dropdown never shows blank.
+    if (c.kind === 'select') {
+      const v = out[c.key];
+      if (v === undefined || c.options.length === 0) continue;
+      if (typeof v === 'string' && c.options.some((o) => o.value === v)) continue;
+      const n = Math.round(Number(v));
+      const idx = Math.min(c.options.length - 1, Math.max(0, Number.isFinite(n) ? n : 0));
+      out[c.key] = c.options[idx].value;
+      continue;
+    }
     if (c.kind !== 'slider' && c.kind !== 'number') continue;
     const n = typeof out[c.key] === 'number' ? (out[c.key] as number) : Number(out[c.key]);
     if (!Number.isFinite(n)) continue;

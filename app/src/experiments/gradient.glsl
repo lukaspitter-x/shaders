@@ -29,11 +29,11 @@ uniform vec2 u_resolution;
 
 // SECTION: Type
 /**
- * Which gradient construction to render, rounded to the nearest step:
- * 0 Linear · 1 Radial · 2 Hole · 3 Mesh · 4 Sky.
+ * Which gradient construction to render. (Exports to Pencil as a 0–4 slider:
+ * 0 Linear · 1 Radial · 2 Hole · 3 Mesh · 4 Sky.)
  * @label Type
+ * @select Linear, Radial, Hole, Mesh, Sky
  * @default 0
- * @range 0, 4
  */
 uniform float u_type;
 

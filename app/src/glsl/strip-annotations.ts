@@ -22,11 +22,58 @@ export function stripHiddenAnnotations(
 
   return source.replace(RE, (full, _sectionLine, docBlock, _uniformDecl, glslType, uniformName) => {
     if (SYSTEM_RE.test(docBlock)) return full;
-    if (visibleKeys.has(uniformName)) return full;
+    if (visibleKeys.has(uniformName)) return downgradeBlock(full, uniformName);
 
     const glslValue = toGlsl(currentValues[uniformName], glslType, docBlock);
     return `#define ${uniformName} ${glslValue}`;
   });
+}
+
+/**
+ * Rewrite workbench-only directives into Pencil's confirmed vocabulary so the
+ * exported file pastes clean (Pencil hard-rejects any unknown `@directive`):
+ *
+ * - `@select A, B, C` → `@range 0, N-1` + a line comment mapping numbers to
+ *   options after the uniform (Pencil ignores line comments).
+ * - `@switch` → `@range 0, 1`, with `@default true/false` numified.
+ * - `@step x` → dropped (slider granularity is a workbench nicety).
+ *
+ * The workbench panel keeps the richer controls — it parses the authored
+ * source; only the export path (and the lint badge) see the downgraded form.
+ */
+export function downgradePencilDirectives(source: string): string {
+  const RE =
+    /(\/\/\s*SECTION:\s*[^\r\n]+?\s*\r?\n\s*)?(\/\*\*[\s\S]*?\*\/\s*)uniform\s+\w+\s+(\w+)\s*;/g;
+  return source.replace(RE, (full, _sectionLine, _docBlock, uniformName) =>
+    downgradeBlock(full, uniformName),
+  );
+}
+
+/** Downgrade one `SECTION? + doc block + uniform decl` chunk (see above). */
+function downgradeBlock(block: string, uniformName: string): string {
+  const selectMatch = block.match(/@select\s+([^@]*?)(?=@|\*\/)/);
+  if (selectMatch) {
+    const options = selectMatch[1]
+      .split(',')
+      .map((s) => s.replace(/[\s*]+/g, ' ').trim())
+      .filter(Boolean);
+    block = block.replace(selectMatch[0], `@range 0, ${options.length - 1}\n * `);
+    const map = options.map((o, i) => `${i} ${o}`).join(' · ');
+    block = block.replace(
+      new RegExp(`(uniform\\s+\\w+\\s+${uniformName}\\s*;)`),
+      `$1 // ${uniformName}: ${map}`,
+    );
+  }
+
+  if (/@switch\b/.test(block)) {
+    block = block
+      .replace(/@switch\b/, '@range 0, 1')
+      .replace(/@default\s+true\b/, '@default 1')
+      .replace(/@default\s+false\b/, '@default 0');
+  }
+
+  block = block.replace(/@step\s+[^@]*?(?=@|\*\/)/, '');
+  return block;
 }
 
 function toGlsl(
@@ -40,6 +87,13 @@ function toGlsl(
     }
     if (glslType === 'float' && typeof value === 'number') {
       return formatFloat(value);
+    }
+    // Select values are stored as numeric strings ('0', '1', …); switches as booleans.
+    if (glslType === 'float' && typeof value === 'string' && value !== '' && Number.isFinite(Number(value))) {
+      return formatFloat(Number(value));
+    }
+    if (glslType === 'float' && typeof value === 'boolean') {
+      return value ? '1.0' : '0.0';
     }
     if (glslType === 'int' && typeof value === 'number') {
       return String(Math.round(value));

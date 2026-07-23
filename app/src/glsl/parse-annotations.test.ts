@@ -110,4 +110,29 @@ describe('sanitizeValues', () => {
     expect(sanitizeValues(parsed.schema, { u_speed: '1.5' }).u_speed).toBe(1.5);
     expect(sanitizeValues(parsed.schema, { u_speed: 'nope' }).u_speed).toBe('nope');
   });
+
+  describe('select controls', () => {
+    // A control that changed kind from slider to select leaves stale NUMERIC
+    // values in stored presets — sanitize must coerce them to option strings.
+    const selectSource = `
+/** @label Type @select Linear, Radial, Hole, Mesh, Sky @default 0 */
+uniform float u_type;
+`;
+    const { schema } = parseShader(selectSource);
+
+    it('coerces a stale numeric value to its option string', () => {
+      expect(sanitizeValues(schema, { u_type: 3 }).u_type).toBe('3');
+      expect(sanitizeValues(schema, { u_type: 0 }).u_type).toBe('0');
+    });
+
+    it('rounds and clamps out-of-range values to a valid option', () => {
+      expect(sanitizeValues(schema, { u_type: 2.4 }).u_type).toBe('2');
+      expect(sanitizeValues(schema, { u_type: 99 }).u_type).toBe('4');
+      expect(sanitizeValues(schema, { u_type: -1 }).u_type).toBe('0');
+    });
+
+    it('passes valid option strings through untouched', () => {
+      expect(sanitizeValues(schema, { u_type: '2' }).u_type).toBe('2');
+    });
+  });
 });
