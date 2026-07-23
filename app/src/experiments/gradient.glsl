@@ -236,6 +236,35 @@ uniform float u_bloom;
  */
 uniform float u_core;
 
+// SECTION: Hole
+/**
+ * Vertical position of the core hotspot inside the disc: -1 is the bottom
+ * rim, 0 the center, 1 the top rim.
+ * @label Core Pos
+ * @default -0.55
+ * @range -1, 1
+ */
+uniform float u_corePos;
+
+// SECTION: Hole
+/**
+ * Horizontal spread of the core hotspot, as a fraction of the disc radius.
+ * @label Core Width
+ * @default 0.55
+ * @range 0.1, 2
+ */
+uniform float u_coreW;
+
+// SECTION: Hole
+/**
+ * Vertical spread of the core hotspot — tall values send the shine up through
+ * the middle of the disc.
+ * @label Core Height
+ * @default 0.9
+ * @range 0.1, 2
+ */
+uniform float u_coreH;
+
 // SECTION: Mesh
 /**
  * How far the four blobs scatter from Center toward the corners. 0 stacks
@@ -365,9 +394,43 @@ float inv(float t) {
 }
 
 /**
+ * Monotone C1 cubic through (0,0) → (0.5, a) → (1,1) with slope 1 at the
+ * joint. Replaces an anchored gamma here: pow(t, g) has unbounded slope at
+ * t=0 whenever the anchor nears 1 (any bright key), which rendered the
+ * faintest glow tails at near-full brightness and drew a hard iso-line
+ * contour where they underflowed to zero. The cubic's slope is bounded
+ * (≤ 2·a), so tails fade smoothly; the anchor clamp keeps it monotone.
+ */
+float anchoredCurve(float t, float a) {
+  a = clamp(a, 0.17, 0.83);
+  float s;
+  float p0;
+  float p1;
+  float m0;
+  float m1;
+  if (t < 0.5) {
+    s = t * 2.0;
+    p0 = 0.0;
+    p1 = a;
+    m0 = a;
+    m1 = 0.5;
+  } else {
+    s = (t - 0.5) * 2.0;
+    p0 = a;
+    p1 = 1.0;
+    m0 = 0.5;
+    m1 = 1.0 - a;
+  }
+  float s2 = s * s;
+  float s3 = s2 * s;
+  return (2.0 * s3 - 3.0 * s2 + 1.0) * p0 + (s3 - 2.0 * s2 + s) * m0 +
+         (-2.0 * s3 + 3.0 * s2) * p1 + (s3 - s2) * m1;
+}
+
+/**
  * The palette engine: tonal position t (0 shadow … 1 light) → color, all
- * derived from the key. Value follows a gamma anchored so t=0.5 lands exactly
- * on the key's own brightness whatever the dark/light range is; saturation
+ * derived from the key. Value follows a smooth curve anchored so t=0.5 lands
+ * near the key's own brightness whatever the dark/light range is; saturation
  * deepens into shadow and washes toward the light; hue drifts linearly and the
  * accent band overrides it locally.
  */
@@ -378,8 +441,7 @@ vec3 ramp(float t) {
   float vDark = key.z * (1.0 - u_rangeDark);
   float vLight = mix(key.z, 1.0, u_rangeLight);
   float span = max(vLight - vDark, 1.0e-4);
-  float anchor = clamp((key.z - vDark) / span, 0.02, 0.98);
-  float v = vDark + span * pow(t, log(anchor) / log(0.5));
+  float v = vDark + span * anchoredCurve(t, (key.z - vDark) / span);
 
   float sDark = clamp(key.y * (1.0 + 0.4 * u_rangeDark), 0.0, 1.0);
   float sLight = key.y * (1.0 - 0.75 * u_rangeLight);
@@ -428,7 +490,7 @@ void main() {
       vec2 gq = vec2(pa.x / (1.0 + 0.9 * u_bloom), pa.y / reach) / scale;
       float glow = u_bloom * exp(-dot(gq, gq) * 1.8);
 
-      vec2 cd = (qn - vec2(0.0, -0.55)) / vec2(0.55, 0.9);
+      vec2 cd = (qn - vec2(0.0, u_corePos)) / vec2(max(u_coreW, 0.05), max(u_coreH, 0.05));
       float core = u_core * exp(-dot(cd, cd)) * disc;
 
       // The dome is attenuated inside the disc so the interior stays a mid
