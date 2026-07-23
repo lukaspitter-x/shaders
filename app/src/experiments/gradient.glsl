@@ -218,12 +218,23 @@ uniform float u_edge;
 
 // SECTION: Hole
 /**
- * Size of the soft glow bleeding upward and outward from the disc.
+ * The dome of light rising above the hole — strength and reach together. High
+ * values push a soft cone of glow several radii up into the background.
  * @label Bloom
  * @default 0.5
  * @range 0, 1
  */
 uniform float u_bloom;
+
+// SECTION: Hole
+/**
+ * Hotspot at the mouth of the hole — a near-white center-bottom highlight, as
+ * if the light source sits just inside the pit and shines out.
+ * @label Core Light
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_core;
 
 // SECTION: Mesh
 /**
@@ -402,12 +413,27 @@ void main() {
       // Radial: light core at Center, shadow end outward.
       t = 1.0 - length(pa) / scale;
     } else {
-      // Hole: squashed disc, crisp below the center line, blooming above it.
-      vec2 q = vec2(pa.x, pa.y / max(u_squash, 0.1));
-      float rr = length(q) / scale;
+      // Hole: three additive terms. A crisp-rimmed disc (hard lower horizon,
+      // moderately soft top), a dome of light rising above it whose vertical
+      // reach scales with Bloom, and a core hotspot at the disc's mouth. The
+      // dome hugs the rim below the horizon so the hard edge stays crisp.
+      float sq = max(u_squash, 0.1);
+      vec2 qn = vec2(pa.x, pa.y / sq) / scale;
+      float rr = length(qn);
       float above = smoothstep(-0.05, 0.3, pa.y / scale);
-      float feather = mix(0.012 + 0.3 * (1.0 - u_edge), 0.15 + 1.8 * u_bloom, above);
-      t = 1.0 - smoothstep(1.0 - feather * 0.25, 1.0 + feather, rr);
+      float feather = mix(0.012 + 0.3 * (1.0 - u_edge), 0.18, above);
+      float disc = 1.0 - smoothstep(1.0 - feather * 0.25, 1.0 + feather, rr);
+
+      float reach = mix(0.45, 0.6 + 2.6 * u_bloom, smoothstep(-0.1, 0.1, pa.y / scale));
+      vec2 gq = vec2(pa.x / (1.0 + 0.9 * u_bloom), pa.y / reach) / scale;
+      float glow = u_bloom * exp(-dot(gq, gq) * 1.8);
+
+      vec2 cd = (qn - vec2(0.0, -0.55)) / vec2(0.55, 0.9);
+      float core = u_core * exp(-dot(cd, cd)) * disc;
+
+      // The dome is attenuated inside the disc so the interior stays a mid
+      // tone and the Core hotspot can read against it.
+      t = disc * 0.66 + glow * (1.0 - 0.75 * disc) + core;
     }
     col = ramp(inv(shapeT(t)));
   } else if (mode < 3.5) {
