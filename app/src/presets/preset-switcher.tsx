@@ -99,7 +99,11 @@ export function PresetSwitcher({ store }: { store: UsePresets }) {
         <Plus />
       </Button>
 
-      <DropdownMenu>
+      {/* modal={false}: this menu opens modal Dialogs (Rename/Revert). With a
+          modal menu, both layers toggle `pointer-events: none` on <body> and a
+          teardown race can leave it stuck — the whole app then ignores clicks
+          ("freezes"). Non-modal, only the Dialog manages the body lock. */}
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button size="icon" variant="outline" title="Preset actions">
             <MoreHorizontal />
