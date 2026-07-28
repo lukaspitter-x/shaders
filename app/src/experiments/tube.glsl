@@ -348,6 +348,28 @@ uniform float u_rimWidth;
  */
 uniform float u_rimMelt;
 
+// SECTION: Env
+/**
+ * Strength of a directional environment light: a rim lobe on whichever side
+ * of the tube faces the light, aimed by Env Rotation. Independent of the
+ * travelling sweep and of the base rim — 0 turns it off entirely.
+ * @label Env Light
+ * @default 0
+ * @range 0, 3
+ */
+uniform float u_envLight;
+
+// SECTION: Env
+/**
+ * World-space direction the environment light shines FROM, in degrees — 90 is
+ * from above (top edge lit), -90 from below. Animate this to swing the lobe
+ * around the tube; nothing else in the scene rotates with it.
+ * @label Env Rotation
+ * @default 90
+ * @range -180, 180
+ */
+uniform float u_envRot;
+
 // SECTION: Motion
 /**
  * Master motion — scales all path movement (flex, travel, sway) together.
@@ -593,7 +615,7 @@ vec2 centerline(float nx, float flex) {
 // features widen by it, so every tap represents its whole kernel segment
 // instead of a point — analytic AA that starves the jitter of steep gradients
 // to turn into grain.
-float shadeT(float q, float L, float Lrim, float beta, float foot) {
+float shadeT(float q, float L, float Lrim, float beta, float foot, float envDot) {
   float aq = abs(q);
   float z = sqrt(max(1.0 - q * q, 0.0));
 
@@ -610,7 +632,12 @@ float shadeT(float q, float L, float Lrim, float beta, float foot) {
   // actually blooms.
   float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
                  * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
-  float rimLevel = u_rimIntensity * sweepMul + u_rimFlare * Lrim;
+  // Env lobe: the 2D surface normal's screen component is q·perp, so
+  // q·envDot picks the side of the tube facing the environment light —
+  // positive side lit, opposite dark. Rides the same rimShape (and defocus
+  // machinery) as the other rims; only this term follows Env Rotation.
+  float rimLevel = u_rimIntensity * sweepMul + u_rimFlare * Lrim +
+                   u_envLight * clamp(q * envDot, 0.0, 1.0);
   float melt = 1.0 + 1.2 * u_bloomAmt * L * u_rimMelt;
   float rimP = mix(14.0, 3.5, u_rimWidth) / melt;
   // The rim's defocus is ANALYTIC: its lobe lives in z, whose sqrt collapse
@@ -678,9 +705,9 @@ float shadeT(float q, float L, float Lrim, float beta, float foot) {
 // the discrete sum matches the continuous integral with no banding and no
 // jitter — the blur is noise-free by construction. In-focus (rad→0)
 // collapses to a single sample.
-float blurShadeT(float q, float L, float Lrim, float beta) {
+float blurShadeT(float q, float L, float Lrim, float beta, float envDot) {
   float rad = 1.2 * beta;
-  if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta, 0.0);
+  if (rad < 1.0e-3) return shadeT(q, L, Lrim, beta, 0.0, envDot);
   const int TAPS = 13;
   float foot = 0.1667 * rad;
   float sum = 0.0;
@@ -688,7 +715,7 @@ float blurShadeT(float q, float L, float Lrim, float beta) {
   for (int i = 0; i < TAPS; i++) {
     float oi = float(i) - 6.0;
     float gw = exp(-oi * oi * 0.0666);
-    sum += shadeT(q + oi * foot, L, Lrim, beta, foot) * gw;
+    sum += shadeT(q + oi * foot, L, Lrim, beta, foot, envDot) * gw;
     wsum += gw;
   }
   return sum / wsum;
@@ -752,18 +779,25 @@ void main() {
   // The split is proportional to beta ONLY: in-focus pixels get exactly zero
   // split (no double edge on the sharp silhouette) and the fringe lives
   // purely in the out-of-focus smear, which is where real glass fringes too.
+  // Env light direction (world/screen space, independent of the tube's local
+  // slope): the lobe lands on the silhouette side facing it. perp is the
+  // centerline's upward normal, so envDot > 0 lights the q > 0 edge.
+  float envA = radians(u_envRot);
+  vec2 envL = vec2(cos(envA), sin(envA));
+  float envDot = dot(normalize(vec2(-slopeP, 1.0)), envL);
+
   float dsp = u_dispersion * beta * 0.09;
   // With no channel split (dispersion off or in focus) all three channels are
   // identical — shade once instead of three times.
   vec3 tRGB;
   if (dsp > 1.0e-4) {
     tRGB = vec3(
-      blurShadeT(q * (1.0 + dsp), L, Lrim, beta),
-      blurShadeT(q, L, Lrim, beta),
-      blurShadeT(q * (1.0 - dsp), L, Lrim, beta)
+      blurShadeT(q * (1.0 + dsp), L, Lrim, beta, envDot),
+      blurShadeT(q, L, Lrim, beta, envDot),
+      blurShadeT(q * (1.0 - dsp), L, Lrim, beta, envDot)
     );
   } else {
-    tRGB = vec3(blurShadeT(q, L, Lrim, beta));
+    tRGB = vec3(blurShadeT(q, L, Lrim, beta, envDot));
   }
   // Highlight ceiling, applied once to the blurred radiance.
   float tCeil = mix(0.6, 1.2, u_highlightCap);
