@@ -336,6 +336,18 @@ uniform float u_shadowTint;
  */
 uniform float u_rimWidth;
 
+// SECTION: Light
+/**
+ * How much the rim dissolves and widens where the travelling light passes
+ * (the bloom-melt). 1 is the classic coupled look; 0 makes the rim's shape
+ * and brightness fully independent of the sweep — combine with Rim Sweep 0
+ * and Rim Flare 0 for a rim that ignores the moving light entirely.
+ * @label Rim Melt
+ * @default 1
+ * @range 0, 1
+ */
+uniform float u_rimMelt;
+
 // SECTION: Motion
 /**
  * Master motion — scales all path movement (flex, travel, sway) together.
@@ -599,7 +611,7 @@ float shadeT(float q, float L, float Lrim, float beta, float foot) {
   float sweepMul = mix(1.0, 0.12 + 1.75 * L, max(u_rimFollow, 0.0))
                  * (1.0 - max(-u_rimFollow, 0.0) * 0.9 * L);
   float rimLevel = u_rimIntensity * sweepMul + u_rimFlare * Lrim;
-  float melt = 1.0 + 1.2 * u_bloomAmt * L;
+  float melt = 1.0 + 1.2 * u_bloomAmt * L * u_rimMelt;
   float rimP = mix(14.0, 3.5, u_rimWidth) / melt;
   // The rim's defocus is ANALYTIC: its lobe lives in z, whose sqrt collapse
   // at the silhouette makes it far thinner in q than any affordable tap
@@ -618,7 +630,7 @@ float shadeT(float q, float L, float Lrim, float beta, float foot) {
   float ridge = exp(-dq1 * dq1 / (2.0 * sigE * sigE)) * sqrt(w0 / sigE);
   float xfade = (sigB * sigB) / (sigE * sigE);    // 0 in focus, →1 as blur dominates
   float rimShape = mix(pow(1.0 - z, rimP), ridge, xfade);
-  float rim = rimShape * rimLevel / (1.0 + 0.8 * u_bloomAmt * L);
+  float rim = rimShape * rimLevel / (1.0 + 0.8 * u_bloomAmt * L * u_rimMelt);
 
   float tTube = body + bloom + rim;
   // Rim Shadow: limb darkening under the hotspot. Where the true light is on
