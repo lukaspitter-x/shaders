@@ -1173,7 +1173,8 @@
           "u_flowShift": 0.8,
           "u_lightSpin": -8,
           "u_flowContour": 0.335,
-          "u_wobbleDir": 0
+          "u_wobbleDir": 0,
+          "u_shoulder": 0.25
         }
       },
       {
@@ -1201,7 +1202,8 @@
           "u_sweep": 0,
           "u_wobble": 0.21,
           "u_wobbleScale": 2.5,
-          "u_wobbleSpeed": 0.8
+          "u_wobbleSpeed": 0.8,
+          "u_shoulder": 0.1
         }
       },
       {
@@ -1231,7 +1233,8 @@
           "u_wobbleScale": 0.5,
           "u_wobbleSpeed": 0,
           "u_tilt": 0.49,
-          "u_persp": 0
+          "u_persp": 0,
+          "u_shoulder": 0.3
         }
       },
       {
@@ -1261,7 +1264,8 @@
           "u_wobbleScale": 0.5,
           "u_wobbleSpeed": 0,
           "u_tilt": 0.4,
-          "u_persp": 0.35
+          "u_persp": 0.35,
+          "u_shoulder": 0.05
         }
       }
     ],

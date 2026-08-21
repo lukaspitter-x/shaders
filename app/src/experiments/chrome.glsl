@@ -44,6 +44,15 @@ uniform float u_bevel;
  */
 uniform float u_profile;
 
+/**
+ * Rounds the junction where the bevel meets the flat top. 0 keeps a hard
+ * machined crease; higher melts the bevel smoothly into the plateau.
+ * @label Shoulder
+ * @default 0.2
+ * @range 0, 0.5
+ */
+uniform float u_shoulder;
+
 // SECTION: Material
 /**
  * Metal tint multiplied over the reflected environment.
@@ -367,6 +376,13 @@ void main() {
   float domeD = (1.0 - t01) / max(dome, 0.02);
   float hD = mix(1.0, domeD, u_profile);
   float dtdd = (t01 > 0.0 && t01 < 1.0) ? 1.0 / bevel : 0.0;
+
+  // C1 shoulder: within u_shoulder of the plateau height, ease the profile
+  // slope quadratically to zero so the bevel blends into the flat top with
+  // no crease (a chamfer otherwise arrives still climbing).
+  float h01 = mix(t01, dome, u_profile);
+  float un = 1.0 - h01;
+  if (u_shoulder > 0.001 && un < u_shoulder) hD *= un / u_shoulder;
 
   float w;
   vec2 wgradP;
