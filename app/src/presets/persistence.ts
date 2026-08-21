@@ -1,5 +1,5 @@
 import type { PresetStore } from './types';
-import { isSeedOnly, pickInitialStore, wouldClobberWorkingCopy } from './working-store';
+import { isSeedOnly, mergeStores, pickInitialStore, wouldClobberWorkingCopy } from './working-store';
 
 const PRESETS_ENDPOINT = '/api/sessions';
 const WORKING_ENDPOINT = '/api/working';
@@ -25,20 +25,20 @@ export async function loadStores(): Promise<{ store: PresetStore; committed: Pre
 
 export async function saveStore(store: PresetStore): Promise<void> {
   try {
-    if (isSeedOnly(store)) {
-      const onDisk = await getJson(WORKING_ENDPOINT);
-      if (wouldClobberWorkingCopy(store, onDisk)) {
-        console.warn(
-          '[shaders] Skipped auto-save: a fresh/seed store would have overwritten your ' +
-            'populated working copy. Your saved presets on disk are preserved — reload to pick them up.',
-        );
-        return;
-      }
+    // Read-merge-write: keep shader entries another tab wrote that this tab
+    // never loaded, instead of clobbering the whole file with our view.
+    const onDisk = await getJson(WORKING_ENDPOINT);
+    if (isSeedOnly(store) && wouldClobberWorkingCopy(store, onDisk)) {
+      console.warn(
+        '[shaders] Skipped auto-save: a fresh/seed store would have overwritten your ' +
+          'populated working copy. Your saved presets on disk are preserved — reload to pick them up.',
+      );
+      return;
     }
     await fetch(WORKING_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(store),
+      body: JSON.stringify(mergeStores(onDisk, store)),
     });
   } catch (err) {
     console.error('Failed to save working presets', err);
@@ -46,14 +46,21 @@ export async function saveStore(store: PresetStore): Promise<void> {
 }
 
 export async function savePresets(store: PresetStore): Promise<void> {
+  const onDisk = await getJson(PRESETS_ENDPOINT);
   const res = await fetch(PRESETS_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(store),
+    body: JSON.stringify(mergeStores(onDisk, store)),
   });
   if (!res.ok) throw new Error(`Save presets failed: ${res.status}`);
 }
 
+/**
+ * Last-gasp write on pagehide. Can't read-merge inside an unload handler
+ * (sendBeacon is fire-and-forget), so this posts the raw store — the clobber
+ * window is only edits another tab made since our last merged autosave
+ * (≤ the 300ms debounce), which the other tab's own autosave re-merges.
+ */
 export function flushStore(store: PresetStore): void {
   const body = JSON.stringify(store);
   try {

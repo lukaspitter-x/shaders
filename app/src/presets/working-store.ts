@@ -10,6 +10,16 @@ export function pickInitialStore(
   return presets && typeof presets === 'object' ? presets : {};
 }
 
+/**
+ * Merge this tab's store over what's on disk, per shader entry. Saves write
+ * the merge instead of the raw in-memory store, so a tab that only touched
+ * one shader can't wipe another tab's work on a different shader. Within
+ * the SAME shader entry the last writer still wins.
+ */
+export function mergeStores(disk: PresetStore, mem: PresetStore): PresetStore {
+  return { ...disk, ...mem };
+}
+
 export function storesEqual(a: PresetStore, b: PresetStore): boolean {
   return canon(a) === canon(b);
 }

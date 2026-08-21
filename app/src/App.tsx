@@ -144,7 +144,7 @@ export default function App() {
   );
   const requiresShape = !!parsed?.system.sdf;
 
-  const [previewScale, setPreviewScale] = useState<PreviewScale>('full');
+  const [previewScale, setPreviewScale] = useLocalStorage<PreviewScale>('previewScale', 'full');
   const hasGrid = parsed?.schema.some((c) => c.key === 'u_gridSize') ?? false;
 
   const selectedShape: ShapeDef | null =

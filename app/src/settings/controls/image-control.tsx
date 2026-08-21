@@ -10,6 +10,13 @@ const revokeIfBlob = (url: string) => {
   if (url.startsWith('blob:')) URL.revokeObjectURL(url);
 };
 
+/**
+ * Uploads above this size stay session-only blob URLs; below it they become
+ * data URLs, which live inside the preset values and therefore survive
+ * reload/restart with the working store.
+ */
+const MAX_PERSIST_BYTES = 4 * 1024 * 1024;
+
 export function ImageControl({
   label,
   hint,
@@ -31,9 +38,19 @@ export function ImageControl({
 
   const onFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
-    const url = URL.createObjectURL(file);
-    if (value) revokeIfBlob(value);
-    onChange(url);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      if (value) revokeIfBlob(value);
+      if (dataUrl.length <= MAX_PERSIST_BYTES) {
+        onChange(dataUrl);
+      } else {
+        console.warn(`[image] "${file.name}" is too large to persist — kept for this session only.`);
+        onChange(URL.createObjectURL(file));
+      }
+    };
+    reader.onerror = () => console.error('[image] read failed', reader.error);
+    reader.readAsDataURL(file);
   };
 
   const onClear = () => {
