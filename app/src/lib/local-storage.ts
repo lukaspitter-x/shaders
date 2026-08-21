@@ -43,3 +43,39 @@ export function useLocalStorage<T>(
   }, [key, value]);
   return [value, setValue];
 }
+
+/**
+ * Tab-scoped UI state, for "what THIS tab has open" (selected shader, shape
+ * picks, view mode). `localStorage` is shared across every tab, so a second
+ * tab (or an automation session) selecting something would otherwise clobber
+ * what a refresh restores here. Reads prefer `sessionStorage` — per-tab and
+ * refresh-surviving — and fall back to `localStorage`, which still seeds
+ * fresh tabs and survives full restarts. Writes go to both.
+ */
+export function readUiState<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_PREFIX + key);
+    if (raw != null) return JSON.parse(raw) as T;
+  } catch {
+    // Corrupt or unavailable — fall through to the shared store.
+  }
+  return readJson(key, fallback);
+}
+
+export function writeUiState(key: string, value: unknown): void {
+  try {
+    sessionStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+  } catch {
+    // Best-effort, never fatal.
+  }
+  writeJson(key, value);
+}
+
+/** `useState` scoped to this tab across refreshes (see readUiState). */
+export function useTabState<T>(key: string, initial: T): [T, Dispatch<SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => readUiState(key, initial));
+  useEffect(() => {
+    writeUiState(key, value);
+  }, [key, value]);
+  return [value, setValue];
+}

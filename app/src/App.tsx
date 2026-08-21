@@ -36,7 +36,14 @@ import {
   envPreviewAvailable,
   type ViewMode,
 } from '@/render/view-modes';
-import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
+import {
+  readJson,
+  readUiState,
+  useLocalStorage,
+  useTabState,
+  writeJson,
+  writeUiState,
+} from '@/lib/local-storage';
 import {
   bakeDefaults,
   downgradePencilDirectives,
@@ -65,11 +72,11 @@ const labelFromFileName = (name: string) => name.replace(/\.[^.]+$/, '') || 'Cus
 
 export default function App() {
   const [selectedId, setSelectedId] = useState<string | undefined>(() => {
-    const saved = readJson<string | null>(SELECTED_KEY, null);
+    const saved = readUiState<string | null>(SELECTED_KEY, null);
     return saved && EXPERIMENTS.some((e) => e.id === saved) ? saved : EXPERIMENTS[0]?.id;
   });
   useEffect(() => {
-    if (selectedId) writeJson(SELECTED_KEY, selectedId);
+    if (selectedId) writeUiState(SELECTED_KEY, selectedId);
   }, [selectedId]);
 
   const [running, setRunning] = useLocalStorage('running', true);
@@ -168,7 +175,7 @@ export default function App() {
       setShapeId('none');
       return;
     }
-    const storedShape = readJson<string | null>(shapeKey(selected.id), null);
+    const storedShape = readUiState<string | null>(shapeKey(selected.id), null);
     setShapeId(
       isUsableShapeId(storedShape, shapes)
         ? storedShape
@@ -180,7 +187,7 @@ export default function App() {
 
   const selectShape = (id: string) => {
     setShapeId(id);
-    if (selectedId) writeJson(shapeKey(selectedId), id);
+    if (selectedId) writeUiState(shapeKey(selectedId), id);
   };
 
   useEffect(() => {
@@ -222,7 +229,7 @@ export default function App() {
   // Viewport view mode: the experiment itself, its host SDF, or the chrome
   // env panorama. Debug modes swap only the VIEWPORT shader — settings, lint,
   // and export always follow the experiment.
-  const [viewMode, setViewMode] = useLocalStorage<ViewMode>('viewMode', 'fill');
+  const [viewMode, setViewMode] = useTabState<ViewMode>('viewMode', 'fill');
   const canSdfView = !!parsed?.system.sdf;
   const canEnvView = envPreviewAvailable(parsed);
   useEffect(() => {

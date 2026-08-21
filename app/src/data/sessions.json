@@ -1133,26 +1133,26 @@
   },
   "chrome": {
     "shaderId": "chrome",
-    "activePresetId": "chrome-polished",
+    "activePresetId": "chrome-liquid",
     "presets": [
       {
         "id": "chrome-polished",
         "name": "Polished Chrome",
         "createdAt": 1755772800000,
         "values": {
-          "u_depth": 43,
-          "u_bevel": 85,
-          "u_profile": 0.17,
+          "u_depth": 67,
+          "u_bevel": 106,
+          "u_profile": 0.43,
           "u_smoothing": 3.75,
           "u_tint": "#ffffff",
           "u_rough": 0.37,
-          "u_contrast": 1.51,
+          "u_contrast": 1.74,
           "u_fresnel": 2,
           "u_brush": 0,
           "u_brushScale": 1,
           "u_lightAngle": 204,
           "u_horizon": 0.15,
-          "u_stripeFreq": 4.6000000000000005,
+          "u_stripeFreq": 6.7,
           "u_stripeAmt": 1,
           "u_envRotation": 0,
           "u_envMix": 0,
@@ -1174,7 +1174,7 @@
           "u_lightSpin": -8,
           "u_flowContour": 0.335,
           "u_wobbleDir": 0,
-          "u_shoulder": 0.25
+          "u_shoulder": 0.258
         }
       },
       {
@@ -1202,8 +1202,7 @@
           "u_sweep": 0,
           "u_wobble": 0.21,
           "u_wobbleScale": 2.5,
-          "u_wobbleSpeed": 0.8,
-          "u_shoulder": 0.1
+          "u_wobbleSpeed": 0.8
         }
       },
       {
@@ -1221,10 +1220,10 @@
           "u_fresnel": 1.3,
           "u_brush": 0,
           "u_brushScale": 1,
-          "u_lightAngle": 138,
+          "u_lightAngle": 160,
           "u_horizon": 0.54,
-          "u_stripeFreq": 3.4000000000000004,
-          "u_stripeAmt": 0.875,
+          "u_stripeFreq": 2.3000000000000003,
+          "u_stripeAmt": 1,
           "u_envRotation": 176,
           "u_envMix": 0,
           "u_envZoom": 1.1400000000000001,
@@ -1232,9 +1231,17 @@
           "u_wobble": 0,
           "u_wobbleScale": 0.5,
           "u_wobbleSpeed": 0,
-          "u_tilt": 0.49,
+          "u_tilt": -0.74,
           "u_persp": 0,
-          "u_shoulder": 0.3
+          "u_shoulder": 0.462,
+          "u_lightSpin": -13,
+          "u_flow": 0,
+          "u_flowAngle": 90,
+          "u_flowSpeed": -0.3,
+          "u_flowContour": 0.11,
+          "u_flowDistort": 0.27,
+          "u_flowSoft": 0.365,
+          "u_flowShift": 0
         }
       },
       {
@@ -1264,8 +1271,7 @@
           "u_wobbleScale": 0.5,
           "u_wobbleSpeed": 0,
           "u_tilt": 0.4,
-          "u_persp": 0.35,
-          "u_shoulder": 0.05
+          "u_persp": 0.35
         }
       }
     ],
@@ -1275,7 +1281,12 @@
       "u_lightSpin",
       "u_depth",
       "u_bevel",
-      "u_profile"
+      "u_profile",
+      "u_shoulder",
+      "u_lightAngle",
+      "u_stripeFreq",
+      "u_stripeAmt",
+      "u_tilt"
     ]
   }
 }
