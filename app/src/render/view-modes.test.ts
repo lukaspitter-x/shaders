@@ -9,9 +9,10 @@ import {
 } from './view-modes';
 
 describe('view modes', () => {
-  it('sdf view parses with an @sdf system uniform', () => {
+  it('sdf view parses with an @sdf system uniform and the bands dial', () => {
     expect(SDF_VIEW_PARSED.system.sdf).toBe('u_shape');
     expect(SDF_VIEW_PARSED.system.resolution).toBe('u_resolution');
+    expect(SDF_VIEW_PARSED.defaults.u_bands).toBe(24);
   });
 
   it('env view declares exactly the uniforms it reads', () => {

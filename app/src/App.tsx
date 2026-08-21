@@ -85,8 +85,14 @@ export default function App() {
   }, [shapeScales]);
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
 
-  // Restore persisted uploads on startup: rebuild each SDF from the stored
-  // original file, so pipeline improvements apply to old uploads too.
+  // Raster/EDT resolution for uploaded shapes (long side, px). Higher keeps
+  // finer detail in the field; rebuilds take longer.
+  const [sdfDetail, setSdfDetail] = useLocalStorage('sdfDetail', 1024);
+
+  // Restore persisted uploads on startup — and REBUILD them whenever the
+  // resolution changes. Each SDF is recomputed from the stored original file,
+  // so pipeline improvements apply to old uploads too. Session-only shapes
+  // (too large to persist) are kept as-is.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -94,18 +100,20 @@ export default function App() {
       const defs: ShapeDef[] = [];
       for (const s of stored) {
         try {
-          const sdf = await imageToSdf(await storedShapeToFile(s));
+          const sdf = await imageToSdf(await storedShapeToFile(s), sdfDetail);
           defs.push(makeCustomShape(sdf, s.id, s.label));
         } catch (err) {
-          console.error('[shapes] restore failed for', s.label, err);
+          console.error('[shapes] rebuild failed for', s.label, err);
         }
       }
-      if (!cancelled && defs.length) setCustomShapes((prev) => [...defs, ...prev]);
+      if (cancelled) return;
+      const rebuilt = new Set(defs.map((d) => d.id));
+      setCustomShapes((prev) => [...defs, ...prev.filter((p) => !rebuilt.has(p.id))]);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sdfDetail]);
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
@@ -162,7 +170,7 @@ export default function App() {
 
   const onUploadShape = async (file: File) => {
     try {
-      const sdf = await imageToSdf(file);
+      const sdf = await imageToSdf(file, sdfDetail);
       const id = `custom-${Date.now()}`;
       const label = labelFromFileName(file.name);
       setCustomShapes((prev) => [...prev, makeCustomShape(sdf, id, label)]);
@@ -206,6 +214,9 @@ export default function App() {
   const viewParsed = viewMode === 'sdf' ? SDF_VIEW_PARSED : viewMode === 'env' ? ENV_VIEW_PARSED : parsed;
   const viewSource =
     viewMode === 'sdf' ? SDF_VIEW_SOURCE : viewMode === 'env' ? ENV_VIEW_SOURCE : selected?.source;
+
+  const [sdfBands, setSdfBands] = useLocalStorage('sdfBands', 24);
+  const sdfViewValues = useMemo<ShaderValues>(() => ({ u_bands: sdfBands }), [sdfBands]);
 
   const VIEW_MODES: { value: ViewMode; label: string; enabled: boolean; title: string }[] = [
     { value: 'fill', label: 'Fill', enabled: true, title: 'Render the shader' },
@@ -406,7 +417,7 @@ export default function App() {
                 <ShaderViewport
                   parsed={viewParsed}
                   fragSource={viewSource}
-                  values={presetStore.values}
+                  values={viewMode === 'sdf' ? sdfViewValues : presetStore.values}
                   running={running}
                   shape={viewMode === 'env' ? null : selectedShape}
                   shapeScale={shapeScale}
@@ -440,6 +451,45 @@ export default function App() {
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />
+                  {viewMode === 'sdf' && (
+                    <div className="flex flex-col gap-2">
+                      <span className="heading">SDF View</span>
+                      <div className="flex gap-1">
+                        {[512, 1024, 2048].map((r) => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setSdfDetail(r)}
+                            className={cn(
+                              'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                              sdfDetail === r
+                                ? 'bg-accent text-accent-foreground'
+                                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                            )}
+                          >
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] leading-snug text-muted-foreground">
+                        Raster resolution for uploaded shapes (long side, px). Higher keeps
+                        finer detail; changing it rebuilds every upload from its original file.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground">Bands</span>
+                        <input
+                          type="range"
+                          min={4}
+                          max={64}
+                          step={1}
+                          value={sdfBands}
+                          onChange={(e) => setSdfBands(Number(e.target.value))}
+                          className="flex-1 accent-foreground"
+                        />
+                        <span className="w-8 text-right text-[11px] tabular-nums">{sdfBands}px</span>
+                      </div>
+                    </div>
+                  )}
                   {hasGrid && (
                     <div className="flex flex-col gap-2">
                       <span className="heading">Preview</span>

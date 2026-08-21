@@ -21,20 +21,34 @@ uniform vec2 u_resolution;
 /** @sdf */
 uniform sampler2D u_shape;
 
+/**
+ * Distance between iso-contour lines, in canvas pixels.
+ * @label Band Spacing
+ * @default 24
+ * @range 4, 64
+ */
+uniform float u_bands;
+
+// All edges are anti-aliased analytically: a true SDF has |gradient| ≈ 1
+// px/px, so distances in d-space ARE screen-space distances.
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float d = texture2D(u_shape, uv).r;
-  float inside = step(0.0, d);
 
-  // Iso bands every 24 canvas px show the field's shape and smoothness.
-  float band = abs(fract(d / 24.0) - 0.5) * 2.0;
-  float shade = 0.3 + 0.55 * band;
-  vec3 inCol = vec3(0.22, 0.5, 0.95) * shade + 0.12;
-  vec3 outCol = vec3(0.9, 0.34, 0.22) * shade * 0.55;
-  vec3 col = mix(outCol, inCol, inside);
+  // Sign tint (blue inside, near-black outside) with a soft transition.
+  float inside = smoothstep(-0.75, 0.75, d);
+  vec3 col = mix(vec3(0.07, 0.08, 0.1), vec3(0.13, 0.26, 0.5), inside);
+  // Gentle depth shading so the interior reads as "higher" toward the core.
+  col += vec3(0.1, 0.12, 0.16) * clamp(d / 160.0, -0.4, 1.0);
 
-  // White line at the zero crossing (the silhouette).
-  float edge = 1.0 - smoothstep(0.0, 2.0, abs(d));
+  // Iso-contour lines every u_bands px.
+  float spacing = max(u_bands, 2.0);
+  float m = abs(fract(d / spacing + 0.5) - 0.5) * spacing; // px to nearest contour
+  float line = 1.0 - smoothstep(0.5, 1.5, m);
+  col = mix(col, vec3(0.55, 0.72, 1.0), line * mix(0.25, 0.6, inside));
+
+  // Bold white line at the zero crossing (the silhouette).
+  float edge = 1.0 - smoothstep(0.4, 1.8, abs(d));
   col = mix(col, vec3(1.0), edge);
 
   gl_FragColor = vec4(col, 1.0);

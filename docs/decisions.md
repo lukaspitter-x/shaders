@@ -338,6 +338,14 @@ undo history is in-memory only.
   test guards that name contract. Env mode passes `shape=null` so the
   panorama isn't clipped to the host silhouette. Gating: SDF needs
   `@sdf`; Env needs the full dial set (`envPreviewAvailable`).
+- **SDF View panel section** — visible only in SDF mode: raster resolution
+  (512/1024/2048, persisted as `sdfDetail`) that rebuilds every upload from
+  its stored original file, and a contour Band Spacing slider (fed to the
+  debug shader as `u_bands`). The SDF view anti-aliases analytically: a true
+  SDF has |∇d| ≈ 1 px/px, so d-space distances ARE screen-space distances —
+  no fwidth needed (which ES 1.00 lacks anyway). Note the wiggly contour
+  centerlines inside thin strokes are the shape's medial axis — a distance
+  field is only C⁰ there; that's geometry, not a resolution bug.
 - **Custom shape delete** — × on hover in the picker (custom tiles only);
   removes from the session, the persisted store, and the scale map, and
   falls back to `rounded-rect` if the deleted shape was selected. Known
