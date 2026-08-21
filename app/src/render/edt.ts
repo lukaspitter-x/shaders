@@ -34,8 +34,13 @@ function edt1d(f: Float64Array, n: number): Float64Array {
   return d;
 }
 
-/** Squared Euclidean distance from each cell to the nearest zero-cost seed. */
-function edt2dSq(cost: Float64Array, w: number, h: number): Float64Array {
+/**
+ * Squared Euclidean distance from each cell to the nearest zero-cost seed
+ * (generalized: nonzero costs act as point sites at depth sqrt(cost)).
+ * Exported for the exact-from-path generator, which seeds it with true
+ * point-to-segment distances.
+ */
+export function edt2dSq(cost: Float64Array, w: number, h: number): Float64Array {
   const tmp = new Float64Array(w * h);
   const col = new Float64Array(h);
   for (let x = 0; x < w; x++) {
@@ -51,6 +56,47 @@ function edt2dSq(cost: Float64Array, w: number, h: number): Float64Array {
     for (let x = 0; x < w; x++) out[y * w + x] = d[x];
   }
   return out;
+}
+
+/**
+ * Separable box blur (3 passes ≈ Gaussian) of a scalar field, radius in
+ * cells. Blurring a distance field rounds its sharp corners and medial-axis
+ * creases — used as the "Corner Smooth" shape control. Radius 0 is identity.
+ */
+export function blurField(data: Float32Array, w: number, h: number, radius: number): Float32Array {
+  const r = Math.round(radius);
+  if (r <= 0) return data;
+  let src = Float64Array.from(data);
+  let dst = new Float64Array(w * h);
+  const norm = 2 * r + 1;
+  for (let pass = 0; pass < 3; pass++) {
+    // Horizontal.
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += src[row + Math.min(w - 1, Math.max(0, k))];
+      for (let x = 0; x < w; x++) {
+        dst[row + x] = acc / norm;
+        const add = Math.min(w - 1, x + r + 1);
+        const sub = Math.max(0, x - r);
+        acc += src[row + add] - src[row + sub];
+      }
+    }
+    [src, dst] = [dst, src];
+    // Vertical.
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += src[Math.min(h - 1, Math.max(0, k)) * w + x];
+      for (let y = 0; y < h; y++) {
+        dst[y * w + x] = acc / norm;
+        const add = Math.min(h - 1, y + r + 1) * w + x;
+        const sub = Math.max(0, y - r) * w + x;
+        acc += src[add] - src[sub];
+      }
+    }
+    [src, dst] = [dst, src];
+  }
+  return Float32Array.from(src);
 }
 
 /**

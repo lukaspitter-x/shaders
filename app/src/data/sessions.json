@@ -1176,7 +1176,17 @@
           "u_wobbleSpeed": 0.7,
           "u_tilt": 0.1,
           "u_persp": 0.5,
-          "u_env": "/env/brown-studio.jpg"
+          "u_env": "/env/brown-studio.jpg",
+          "u_flow": 0.45,
+          "u_flowRep": 4,
+          "u_flowAngle": 70,
+          "u_flowSpeed": 0.25,
+          "u_flowContour": 0.75,
+          "u_flowDistort": 0.5,
+          "u_flowSoft": 0.3,
+          "u_flowShift": 0.25,
+          "u_wobbleDir": 0,
+          "u_lightSpin": 0
         }
       },
       {

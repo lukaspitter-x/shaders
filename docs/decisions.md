@@ -338,6 +338,30 @@ undo history is in-memory only.
   test guards that name contract. Env mode passes `shape=null` so the
   panorama isn't clipped to the host silhouette. Gating: SDF needs
   `@sdf`; Env needs the full dial set (`envPreviewAvailable`).
+- **Exact-from-path SDF** (`render/svg-sdf.ts`) — SVG uploads default to
+  tracing the actual vector geometry instead of rasterize+EDT: the browser
+  samples every SVGGeometryElement via `getPointAtLength` (uniform handling
+  of paths/primitives/transforms; subpaths split by jump detection), sign
+  comes from scanline winding (nonzero + evenodd, elements unioned), and
+  exact point-to-segment distances seed the generalized EDT. Seeds must hug
+  the boundary (≤ ~1 cell): the transform composes as √(a²+b²), which only
+  approximates a+b for small b. Stroke-only (`fill:none`) elements can't be
+  filled → silent raster fallback. Shape Field panel: Source (Exact/Raster),
+  Resolution, Expand (± px silhouette offset at render time — exact SDF
+  offsetting), Corner Smooth (`blurField` on the grid, rebuild-time).
+- **Flow layer in chrome.glsl** — studied paper-design's liquid-metal
+  (github.com/paper-design/shaders): their look is an animated repeating
+  chrome ramp (thin strip / dark gap / wide gradient) over a warped
+  coordinate with per-channel phase dispersion, not an env model. Ported as
+  the Flow section: phase blends a screen direction with the SDF distance
+  (contour-following is trivial with a real SDF where they need a Poisson
+  solve), noise-warped, signed drift speed, RGB dispersion, lit by the env
+  luminance so the 3D shading survives. Plus their banding fix: a ±1/255
+  hash dither before output.
+- **Motion controls** — every animated quantity has a signed speed dial:
+  Env Spin (u_sweep), Light Spin (u_lightSpin, animates the light/env-up
+  angle), Flow Speed, Wobble Speed + Wobble Direction (the wobble field's
+  drift was previously fixed-direction).
 - **SDF View panel section** — visible only in SDF mode: raster resolution
   (512/1024/2048, persisted as `sdfDetail`) that rebuilds every upload from
   its stored original file, and a contour Band Spacing slider (fed to the

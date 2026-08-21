@@ -102,6 +102,74 @@ uniform float u_brush;
  */
 uniform float u_brushScale;
 
+// SECTION: Flow
+/**
+ * Liquid-metal stripe layer blended over the reflection: repeating chrome
+ * bands that follow the shape's contours and drift over time. 0 disables.
+ * @label Flow Amount
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_flow;
+
+/**
+ * Density of the stripe pattern.
+ * @label Repetition
+ * @default 4
+ * @range 1, 12
+ */
+uniform float u_flowRep;
+
+/**
+ * Screen direction the stripes run across, degrees.
+ * @label Flow Angle
+ * @default 70
+ * @range 0, 360
+ */
+uniform float u_flowAngle;
+
+/**
+ * Drift speed of the stripes, in cycles per second. Negative reverses.
+ * @label Flow Speed
+ * @default 0.3
+ * @range -2, 2
+ */
+uniform float u_flowSpeed;
+
+/**
+ * 0 = straight stripes across the canvas, 1 = stripes wrap along the
+ * shape's outline (contour-following, via the SDF).
+ * @label Contour Follow
+ * @default 0.7
+ * @range 0, 1
+ */
+uniform float u_flowContour;
+
+/**
+ * Noise warp of the stripes for an organic, molten look.
+ * @label Flow Distortion
+ * @default 0.4
+ * @range 0, 2
+ */
+uniform float u_flowDistort;
+
+/**
+ * Softness of the stripe transitions. 0 is hard-edged chrome bands.
+ * @label Flow Softness
+ * @default 0.3
+ * @range 0, 1
+ */
+uniform float u_flowSoft;
+
+/**
+ * Chromatic dispersion: offsets the red/blue stripe phases for subtle
+ * rainbow fringing on the band edges.
+ * @label Dispersion
+ * @default 0.2
+ * @range 0, 1
+ */
+uniform float u_flowShift;
+
 // SECTION: Environment
 /**
  * Screen direction the environment's "up" (and key light) comes from, degrees.
@@ -187,12 +255,22 @@ uniform float u_envZoom;
 
 // SECTION: Motion
 /**
- * Continuous environment rotation, degrees per second. 0 is static.
- * @label Auto Sweep
+ * Continuous environment rotation, degrees per second. Negative reverses
+ * direction; 0 is static.
+ * @label Env Spin
  * @default 0
  * @range -90, 90
  */
 uniform float u_sweep;
+
+/**
+ * Continuous rotation of the light/env-up direction, degrees per second.
+ * Negative reverses direction; 0 is static.
+ * @label Light Spin
+ * @default 0
+ * @range -90, 90
+ */
+uniform float u_lightSpin;
 
 /**
  * Animated liquid swell of the surface. 0 keeps the metal rigid.
@@ -218,6 +296,14 @@ uniform float u_wobbleScale;
  */
 uniform float u_wobbleSpeed;
 
+/**
+ * Screen direction the liquid swell drifts toward, degrees.
+ * @label Wobble Direction
+ * @default 0
+ * @range 0, 360
+ */
+uniform float u_wobbleDir;
+
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -233,8 +319,23 @@ float vnoise(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// One cycle of a chrome stripe ramp (paper-design style): a thin bright
+// strip, a dark gap, a small bright echo, then a wide dark-to-bright sweep.
+float chromeRamp(float t, float blur) {
+  float c = mix(0.95, 0.08, smoothstep(0.10, 0.10 + blur, t));
+  c = mix(c, 0.75, smoothstep(0.16, 0.16 + blur, t));
+  c = mix(c, 0.12, smoothstep(0.22, 0.22 + blur, t));
+  c = mix(c, mix(0.12, 0.95, smoothstep(0.28, 1.0, t)), smoothstep(0.28, 0.28 + blur, t));
+  return c;
+}
+
 float wobbleField(vec2 p) {
   float t = u_time * u_wobbleSpeed;
+  // Rotate the field so the drift direction is dialable.
+  float wa = radians(u_wobbleDir);
+  float wc = cos(wa);
+  float ws = sin(wa);
+  p = vec2(wc * p.x + ws * p.y, -ws * p.x + wc * p.y);
   vec2 q = p * u_wobbleScale;
   float w = sin(q.x * 3.1 + t * 1.7 + sin(q.y * 2.3 - t * 1.3));
   w += sin(q.y * 2.7 - t + sin(q.x * 1.9 + t * 0.8));
@@ -284,8 +385,10 @@ void main() {
   vec3 v = normalize(vec3(-vxy, 1.0));
   vec3 r = 2.0 * dot(n, v) * n - v;
 
-  // Rotate screen space so the environment's "up" follows the light angle.
-  float envUp = radians(u_lightAngle - 90.0);
+  // Rotate screen space so the environment's "up" follows the light angle
+  // (animatable via Light Spin).
+  float lightAng = u_lightAngle + u_time * u_lightSpin;
+  float envUp = radians(lightAng - 90.0);
   float cu = cos(envUp);
   float su = sin(envUp);
   vec2 rr = vec2(cu * r.x + su * r.y, -su * r.x + cu * r.y);
@@ -317,7 +420,7 @@ void main() {
 
   // Brushed streaks on near-flat areas, drawn across the light direction.
   float topMask = smoothstep(0.85, 0.98, n.z);
-  float la = radians(u_lightAngle);
+  float la = radians(lightAng);
   vec2 dir = vec2(cos(la), sin(la));
   vec2 perp = vec2(-dir.y, dir.x);
   vec2 sp = gl_FragCoord.xy;
@@ -338,11 +441,37 @@ void main() {
     envC = mix(envC, img * (0.4 + 0.8 * envL), u_envMix);
   }
 
+  // Liquid-metal flow stripes (paper-design style): a repeating chrome ramp
+  // indexed by a coordinate that blends a screen direction with the SDF
+  // distance (contour-following), noise-warped and drifting over time.
+  if (u_flow > 0.001) {
+    float fa = radians(u_flowAngle);
+    vec2 fdir = vec2(cos(fa), sin(fa));
+    vec2 fp = (uv - 0.5) * vec2(aspect, 1.0);
+    float dNorm = d / u_resolution.y;
+    float phase = mix(dot(fp, fdir), -dNorm * 2.0, u_flowContour) * u_flowRep;
+    float nz = vnoise(fp * 3.0 + vec2(u_time * 0.15, -u_time * 0.1));
+    phase += u_flowDistort * (nz - 0.5);
+    phase -= u_time * u_flowSpeed;
+    float fblur = 0.04 + 0.3 * u_flowSoft;
+    float shift = u_flowShift * 0.06;
+    vec3 flowC = vec3(
+      chromeRamp(fract(phase + shift), fblur),
+      chromeRamp(fract(phase), fblur),
+      chromeRamp(fract(phase - shift), fblur)
+    );
+    // Keep the 3D shading: stripes are lit by the env luminance.
+    envC = mix(envC, flowC * (0.35 + 0.9 * envL), u_flow);
+  }
+
   float rim = pow(1.0 - clamp(n.z, 0.0, 1.0), 5.0) * u_fresnel * 0.7;
   vec3 col = u_tint * envC + u_tint * rim * (0.35 + 0.65 * horizon);
   // Soft shoulder above 0.75 so highlights roll into white instead of clipping.
   vec3 hi = max(col - 0.75, 0.0);
   col = clamp(min(col, vec3(0.75)) + hi / (1.0 + 2.0 * hi), 0.0, 1.0);
+  // Blue-noise-ish dither kills banding in the smooth dark gradients.
+  col += (hash21(gl_FragCoord.xy) - 0.5) * 0.008;
+  col = clamp(col, 0.0, 1.0);
 
   float alpha = smoothstep(0.0, 1.5, d);
   gl_FragColor = vec4(col, alpha);

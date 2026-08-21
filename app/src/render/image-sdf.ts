@@ -17,7 +17,15 @@
  * rather than capped by it, so a small icon still yields a crisp SDF.
  */
 import { signedDistanceTransformAA } from './edt';
+import { extractSvgPolylines, polysToSdf } from './svg-sdf';
 import type { NormalizedSdf } from './sdf-shapes';
+
+/**
+ * How to build the field from an SVG: 'exact' traces the vector geometry
+ * (see svg-sdf.ts) with silent fallback to raster; 'raster' always
+ * rasterizes. Non-SVG inputs are always rasterized.
+ */
+export type SdfSource = 'exact' | 'raster';
 
 interface DecodedImage {
   source: CanvasImageSource;
@@ -53,8 +61,28 @@ async function decodeImageFile(file: File, maxDim: number): Promise<DecodedImage
   }
 }
 
-export async function imageToSdf(file: File, maxDim = 1024): Promise<NormalizedSdf> {
+export async function imageToSdf(
+  file: File,
+  maxDim = 1024,
+  source: SdfSource = 'exact',
+): Promise<NormalizedSdf> {
   const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
+
+  if (isSvg && source === 'exact') {
+    try {
+      const extracted = await extractSvgPolylines(await file.text(), maxDim);
+      if (!extracted.hasUnsupported && extracted.polys.length > 0) {
+        const aspect = extracted.width / extracted.height;
+        const gw = aspect >= 1 ? maxDim : Math.max(1, Math.round(maxDim * aspect));
+        const gh = aspect >= 1 ? Math.max(1, Math.round(maxDim / aspect)) : maxDim;
+        const data = polysToSdf(extracted.polys, extracted.width, extracted.height, gw, gh);
+        return { width: gw, height: gh, aspect: gw / gh, data };
+      }
+      console.info('[sdf] SVG has stroke-only/unfillable elements — using raster mode');
+    } catch (err) {
+      console.warn('[sdf] exact-from-path failed — falling back to raster', err);
+    }
+  }
   const decoded = await decodeImageFile(file, maxDim);
   const scale = isSvg
     ? maxDim / Math.max(decoded.width, decoded.height)

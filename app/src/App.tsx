@@ -18,8 +18,9 @@ import { SettingsColumn } from '@/settings/settings-column';
 import { parseShader, type ShaderValues } from '@/glsl/parse-annotations';
 import { lintPencil } from '@/glsl/lint-pencil';
 import { ShaderViewport } from '@/render/shader-viewport';
-import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
-import { imageToSdf } from '@/render/image-sdf';
+import { BUILTIN_SHAPES, makeCustomShape, type NormalizedSdf, type ShapeDef } from '@/render/sdf-shapes';
+import { imageToSdf, type SdfSource } from '@/render/image-sdf';
+import { blurField } from '@/render/edt';
 import {
   fileToDataUrl,
   loadStoredShapes,
@@ -85,35 +86,53 @@ export default function App() {
   }, [shapeScales]);
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
 
-  // Raster/EDT resolution for uploaded shapes (long side, px). Higher keeps
-  // finer detail in the field; rebuilds take longer.
+  // Shape-field generation controls (persisted). Detail = raster/grid long
+  // side; source = exact vector tracing vs rasterize+EDT (SVG only); smooth =
+  // field blur radius in grid cells (rounds corners); expand = silhouette
+  // offset in canvas px (bold/thin), applied at render time.
   const [sdfDetail, setSdfDetail] = useLocalStorage('sdfDetail', 1024);
+  const [sdfSource, setSdfSource] = useLocalStorage<SdfSource>('sdfSource', 'exact');
+  const [shapeSmooth, setShapeSmooth] = useLocalStorage('shapeSmooth', 0);
+  const [shapeExpand, setShapeExpand] = useLocalStorage('shapeExpand', 0);
 
-  // Restore persisted uploads on startup — and REBUILD them whenever the
-  // resolution changes. Each SDF is recomputed from the stored original file,
-  // so pipeline improvements apply to old uploads too. Session-only shapes
-  // (too large to persist) are kept as-is.
+  const buildShapeSdf = async (file: File): Promise<NormalizedSdf> => {
+    let sdf = await imageToSdf(file, sdfDetail, sdfSource);
+    if (shapeSmooth > 0) {
+      sdf = { ...sdf, data: blurField(sdf.data, sdf.width, sdf.height, shapeSmooth) };
+    }
+    return sdf;
+  };
+
+  // Restore persisted uploads on startup — and REBUILD them whenever a
+  // generation control changes (debounced for the smooth slider). Each SDF
+  // is recomputed from the stored original file, so pipeline improvements
+  // apply to old uploads too. Session-only shapes (too large to persist) are
+  // kept as-is.
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const stored = await loadStoredShapes();
-      const defs: ShapeDef[] = [];
-      for (const s of stored) {
-        try {
-          const sdf = await imageToSdf(await storedShapeToFile(s), sdfDetail);
-          defs.push(makeCustomShape(sdf, s.id, s.label));
-        } catch (err) {
-          console.error('[shapes] rebuild failed for', s.label, err);
+    const timer = setTimeout(() => {
+      void (async () => {
+        const stored = await loadStoredShapes();
+        const defs: ShapeDef[] = [];
+        for (const s of stored) {
+          try {
+            const sdf = await buildShapeSdf(await storedShapeToFile(s));
+            defs.push(makeCustomShape(sdf, s.id, s.label));
+          } catch (err) {
+            console.error('[shapes] rebuild failed for', s.label, err);
+          }
         }
-      }
-      if (cancelled) return;
-      const rebuilt = new Set(defs.map((d) => d.id));
-      setCustomShapes((prev) => [...defs, ...prev.filter((p) => !rebuilt.has(p.id))]);
-    })();
+        if (cancelled) return;
+        const rebuilt = new Set(defs.map((d) => d.id));
+        setCustomShapes((prev) => [...defs, ...prev.filter((p) => !rebuilt.has(p.id))]);
+      })();
+    }, 250);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [sdfDetail]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sdfDetail, sdfSource, shapeSmooth]);
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
@@ -170,7 +189,7 @@ export default function App() {
 
   const onUploadShape = async (file: File) => {
     try {
-      const sdf = await imageToSdf(file, sdfDetail);
+      const sdf = await buildShapeSdf(file);
       const id = `custom-${Date.now()}`;
       const label = labelFromFileName(file.name);
       setCustomShapes((prev) => [...prev, makeCustomShape(sdf, id, label)]);
@@ -421,6 +440,7 @@ export default function App() {
                   running={running}
                   shape={viewMode === 'env' ? null : selectedShape}
                   shapeScale={shapeScale}
+                  shapeExpand={shapeExpand}
                   lint={viewMode === 'fill' ? lint : []}
                   previewScale={hasGrid ? previewScale : 'full'}
                 />
@@ -451,9 +471,31 @@ export default function App() {
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />
-                  {viewMode === 'sdf' && (
+                  {(viewMode === 'sdf' || selectedShape?.custom) && (
                     <div className="flex flex-col gap-2">
-                      <span className="heading">SDF View</span>
+                      <span className="heading">Shape Field</span>
+                      <div className="flex gap-1">
+                        {(['exact', 'raster'] as const).map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            title={
+                              s === 'exact'
+                                ? 'Trace the SVG vector outlines directly (SVG only; others always rasterize)'
+                                : 'Rasterize + distance transform'
+                            }
+                            onClick={() => setSdfSource(s)}
+                            className={cn(
+                              'flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
+                              sdfSource === s
+                                ? 'bg-accent text-accent-foreground'
+                                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                            )}
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
                       <div className="flex gap-1">
                         {[512, 1024, 2048].map((r) => (
                           <button
@@ -472,22 +514,53 @@ export default function App() {
                         ))}
                       </div>
                       <p className="text-[10px] leading-snug text-muted-foreground">
-                        Raster resolution for uploaded shapes (long side, px). Higher keeps
-                        finer detail; changing it rebuilds every upload from its original file.
+                        Source + grid resolution for uploaded shapes. Changing either rebuilds
+                        every upload from its original file.
                       </p>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-muted-foreground">Bands</span>
+                        <span className="w-12 text-[11px] text-muted-foreground">Expand</span>
                         <input
                           type="range"
-                          min={4}
-                          max={64}
-                          step={1}
-                          value={sdfBands}
-                          onChange={(e) => setSdfBands(Number(e.target.value))}
+                          min={-20}
+                          max={20}
+                          step={0.5}
+                          value={shapeExpand}
+                          onChange={(e) => setShapeExpand(Number(e.target.value))}
+                          onDoubleClick={() => setShapeExpand(0)}
                           className="flex-1 accent-foreground"
                         />
-                        <span className="w-8 text-right text-[11px] tabular-nums">{sdfBands}px</span>
+                        <span className="w-9 text-right text-[11px] tabular-nums">
+                          {shapeExpand}px
+                        </span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-[11px] text-muted-foreground">Smooth</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={6}
+                          step={1}
+                          value={shapeSmooth}
+                          onChange={(e) => setShapeSmooth(Number(e.target.value))}
+                          className="flex-1 accent-foreground"
+                        />
+                        <span className="w-9 text-right text-[11px] tabular-nums">{shapeSmooth}</span>
+                      </div>
+                      {viewMode === 'sdf' && (
+                        <div className="flex items-center gap-2">
+                          <span className="w-12 text-[11px] text-muted-foreground">Bands</span>
+                          <input
+                            type="range"
+                            min={4}
+                            max={64}
+                            step={1}
+                            value={sdfBands}
+                            onChange={(e) => setSdfBands(Number(e.target.value))}
+                            className="flex-1 accent-foreground"
+                          />
+                          <span className="w-9 text-right text-[11px] tabular-nums">{sdfBands}px</span>
+                        </div>
+                      )}
                     </div>
                   )}
                   {hasGrid && (

@@ -22,6 +22,7 @@ export function ShaderViewport({
   running,
   shape,
   shapeScale = 1,
+  shapeExpand = 0,
   lint,
   previewScale = 'full',
 }: {
@@ -33,6 +34,8 @@ export function ShaderViewport({
   shape: ShapeDef | null;
   /** User size multiplier for custom shapes (1 = fit to canvas). */
   shapeScale?: number;
+  /** Silhouette offset for custom shapes, canvas px (+ bold / − thin). */
+  shapeExpand?: number;
   lint: LintFinding[];
   /** Grid preview scale: 'full' = native resolution, 1–4 = one cell = N pixels. */
   previewScale?: 'full' | 1 | 2 | 3 | 4;
@@ -44,6 +47,7 @@ export function ShaderViewport({
   const valuesRef = useRef(values);
   const shapeRef = useRef(shape);
   const shapeScaleRef = useRef(shapeScale);
+  const shapeExpandRef = useRef(shapeExpand);
   const sizeRef = useRef({ w: 1, h: 1 });
   const timeRef = useRef(0);
   const mouseRef = useRef<[number, number]>([0, 0]);
@@ -54,6 +58,7 @@ export function ShaderViewport({
   valuesRef.current = values;
   shapeRef.current = shape;
   shapeScaleRef.current = shapeScale;
+  shapeExpandRef.current = shapeExpand;
   previewScaleRef.current = previewScale;
 
   /** Compute the backing resolution. In scale mode, render square at full res. */
@@ -122,7 +127,9 @@ export function ShaderViewport({
         Math.min(1, canvasAspect / (def.aspect ?? 1)) * 0.92 * (shapeScaleRef.current || 1);
       const normalized = resampleSdfBspline(def.grid, texW, texH, canvasAspect, fit);
       const px = new Float32Array(normalized.length);
-      for (let i = 0; i < px.length; i++) px[i] = normalized[i] * h;
+      // Expand offsets every distance uniformly = exact silhouette offsetting.
+      const expand = shapeExpandRef.current || 0;
+      for (let i = 0; i < px.length; i++) px[i] = normalized[i] * h + expand;
       r.setSdf(px, texW, texH);
       return;
     }
@@ -194,12 +201,12 @@ export function ShaderViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragSource]);
 
-  // Rebuild the SDF when the host shape or its size dial changes.
+  // Rebuild the SDF when the host shape or its size/expand dials change.
   useEffect(() => {
     regenerateSdf();
     drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, shapeScale]);
+  }, [shape, shapeScale, shapeExpand]);
 
   // Load user images into GL textures when their blob URLs change.
   const loadedImagesRef = useRef<Record<string, string>>({});
