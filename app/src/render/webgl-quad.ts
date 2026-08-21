@@ -113,10 +113,28 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     // `null` (None / full background) → a 1×1 zero field: u_shape reads 0
     // everywhere (the empty-rectangle case, D8) and the clip is turned off.
     if (data) {
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.R16F, width, height, 0, gl!.RED, gl!.FLOAT, data);
+      // Pencil's @sdf contract: r = signed distance, gb = the field's
+      // gradient in texel space ("use gb instead of numerically
+      // differentiating r"). Mirror it: central differences per texel.
+      const rgba = new Float32Array(width * height * 4);
+      for (let y = 0; y < height; y++) {
+        const ym = Math.max(0, y - 1) * width;
+        const yp = Math.min(height - 1, y + 1) * width;
+        const row = y * width;
+        for (let x = 0; x < width; x++) {
+          const xm = Math.max(0, x - 1);
+          const xp = Math.min(width - 1, x + 1);
+          const o = (row + x) * 4;
+          rgba[o] = data[row + x];
+          rgba[o + 1] = (data[row + xp] - data[row + xm]) * 0.5;
+          rgba[o + 2] = (data[yp + x] - data[ym + x]) * 0.5;
+          rgba[o + 3] = 1;
+        }
+      }
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA16F, width, height, 0, gl!.RGBA, gl!.FLOAT, rgba);
       hasSdf = true;
     } else {
-      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.R16F, 1, 1, 0, gl!.RED, gl!.FLOAT, new Float32Array([0]));
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA16F, 1, 1, 0, gl!.RGBA, gl!.FLOAT, new Float32Array([0, 0, 0, 1]));
       hasSdf = false;
     }
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);

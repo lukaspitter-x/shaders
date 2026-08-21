@@ -44,15 +44,6 @@ uniform float u_bevel;
  */
 uniform float u_profile;
 
-/**
- * Radius of the normal-smoothing filter, in canvas pixels. Higher softens
- * faceting from the SDF texture at the cost of finer surface detail.
- * @label Normal Smooth
- * @default 3
- * @range 1, 8
- */
-uniform float u_smoothing;
-
 // SECTION: Material
 /**
  * Metal tint multiplied over the reflected environment.
@@ -329,59 +320,66 @@ float chromeRamp(float t, float blur) {
   return c;
 }
 
-float wobbleField(vec2 p) {
+/** Liquid swell field and its analytic gradient (in p units). */
+void wobble(vec2 p, out float w, out vec2 grad) {
   float t = u_time * u_wobbleSpeed;
-  // Rotate the field so the drift direction is dialable.
+  // Rotate the field so the drift direction is dialable; the gradient comes
+  // back through the transpose rotation.
   float wa = radians(u_wobbleDir);
   float wc = cos(wa);
   float ws = sin(wa);
-  p = vec2(wc * p.x + ws * p.y, -ws * p.x + wc * p.y);
-  vec2 q = p * u_wobbleScale;
-  float w = sin(q.x * 3.1 + t * 1.7 + sin(q.y * 2.3 - t * 1.3));
-  w += sin(q.y * 2.7 - t + sin(q.x * 1.9 + t * 0.8));
-  return w * 0.25;
-}
-
-/** Height in canvas pixels at a canvas uv (0 outside the shape). */
-float heightAt(vec2 uv) {
-  float d = texture2D(u_shape, uv).r;
-  float t = clamp(d / max(u_bevel, 1.0), 0.0, 1.0);
-  float dome = sqrt(max(1.0 - (1.0 - t) * (1.0 - t), 0.0));
-  float h01 = mix(t, dome, u_profile);
-  float aspect = u_resolution.x / u_resolution.y;
-  vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
-  h01 += wobbleField(p) * u_wobble * 0.35 * t;
-  return h01 * u_depth;
+  vec2 pr = vec2(wc * p.x + ws * p.y, -ws * p.x + wc * p.y);
+  vec2 q = pr * u_wobbleScale;
+  float inner1 = q.y * 2.3 - t * 1.3;
+  float inner2 = q.x * 1.9 + t * 0.8;
+  float A = q.x * 3.1 + t * 1.7 + sin(inner1);
+  float B = q.y * 2.7 - t + sin(inner2);
+  w = (sin(A) + sin(B)) * 0.25;
+  vec2 gq = 0.25 * (cos(A) * vec2(3.1, 2.3 * cos(inner1)) + cos(B) * vec2(1.9 * cos(inner2), 2.7));
+  vec2 gpr = gq * u_wobbleScale;
+  grad = vec2(wc * gpr.x - ws * gpr.y, ws * gpr.x + wc * gpr.y);
 }
 
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
-  float d = texture2D(u_shape, uv).r;
+  vec4 field = texture2D(u_shape, uv);
+  float d = field.r;
   if (d <= 0.0) {
     gl_FragColor = vec4(0.0);
     return;
   }
 
-  // Surface normal from a Sobel over the height field — the diagonal taps
-  // smooth the bilinear staircase of the SDF texture's gradient.
-  vec2 px = 1.0 / u_resolution;
-  float e = max(u_smoothing, 0.5);
-  float hE = heightAt(uv + vec2(e, 0.0) * px);
-  float hW = heightAt(uv - vec2(e, 0.0) * px);
-  float hN = heightAt(uv + vec2(0.0, e) * px);
-  float hS = heightAt(uv - vec2(0.0, e) * px);
-  float hNE = heightAt(uv + vec2(e, e) * px);
-  float hNW = heightAt(uv + vec2(-e, e) * px);
-  float hSE = heightAt(uv + vec2(e, -e) * px);
-  float hSW = heightAt(uv + vec2(-e, -e) * px);
-  float gx = (hNE + 2.0 * hE + hSE) - (hNW + 2.0 * hW + hSW);
-  float gy = (hNE + 2.0 * hN + hNW) - (hSE + 2.0 * hS + hSW);
-  vec3 n = normalize(vec3(-gx / (8.0 * e), -gy / (8.0 * e), 1.0));
+  // Surface normal, fully analytic: the @sdf texture's gb channels carry the
+  // distance-field gradient (per Pencil's contract — never differentiate the
+  // r channel numerically). A true SDF has |∇d| = 1, so only the direction
+  // is needed; the height slope comes from the chain rule h'(d)·∇d plus the
+  // wobble field's own analytic gradient.
+  vec2 g = field.gb;
+  float glen = length(g);
+  vec2 gdir = glen > 1e-5 ? g / glen : vec2(0.0);
+
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
+
+  float bevel = max(u_bevel, 1.0);
+  float t01 = clamp(d / bevel, 0.0, 1.0);
+  float dome = sqrt(max(1.0 - (1.0 - t01) * (1.0 - t01), 0.0));
+  float domeD = (1.0 - t01) / max(dome, 0.02);
+  float hD = mix(1.0, domeD, u_profile);
+  float dtdd = (t01 > 0.0 && t01 < 1.0) ? 1.0 / bevel : 0.0;
+
+  float w;
+  vec2 wgradP;
+  wobble(p, w, wgradP);
+  vec2 wgradPx = wgradP / u_resolution.y;
+
+  vec2 gradH = u_depth *
+    ((hD + 0.35 * u_wobble * w) * dtdd * gdir + 0.35 * u_wobble * t01 * wgradPx);
+  vec3 n = normalize(vec3(-gradH, 1.0));
 
   // View ray from a virtual camera above the canvas center; u_persp = 0
   // degenerates to the straight-on orthographic view.
-  float aspect = u_resolution.x / u_resolution.y;
-  vec2 vxy = (uv - 0.5) * vec2(aspect, 1.0) * u_persp;
+  vec2 vxy = p * u_persp;
   vec3 v = normalize(vec3(-vxy, 1.0));
   vec3 r = 2.0 * dot(n, v) * n - v;
 

@@ -398,6 +398,33 @@ undo history is in-memory only.
   viewer-facing front (dark) and 1 at the silhouette (bright rim) — an eclipse/
   corona by construction. Loop-free, so it's trivially Pencil-safe.
 
+## Pencil contract updates (read from the live app via MCP, 2026-08-21)
+
+- **`@sdf` carries the gradient in gb.** Official contract: r = signed
+  distance in `@resolution` units (positive inside); **gb = the field's
+  gradient in texel space — "use gb instead of numerically differentiating
+  the r channel."** Chrome now computes normals fully analytically
+  (chain rule `h'(d)·∇d` with ∇d direction from gb + the wobble field's
+  closed-form gradient); the Sobel and the Normal Smooth dial are gone. The
+  workbench uploads RGBA16F with central-difference gb to mirror the
+  contract, so the preview stays faithful by construction.
+- **Current annotation set** (authoritative): `@color @default @resolution
+  @mouse @time @sdf @backdrop @min @max @range @label`. `@backdrop` is new —
+  a sampler of the content behind the node, for refraction/glass effects.
+  `@min`/`@max` exist as separate directives (`@range` is their shorthand).
+- **`textureSize(sampler, lod)` is now officially supported** ("WebGL 1.0
+  with one addition"). The old 2-sampler miscompile finding (D8) may be
+  stale; we still avoid it, which stays safe either way.
+- **Shader fills are file-based**: `fill: { type: "shader", url:
+  "./file.glsl", uniforms: {...} }`, url relative to the .pen file. The
+  workbench workflow is Download (or Copy) → save next to the .pen → pick
+  it in a shader fill. Uniform overrides accept numbers, booleans, hex
+  strings, and number arrays.
+- **Pencil's Export/TakeScreenshot do NOT render shader fills** (verified:
+  even the docs' own checker example exports blank). Shader output can only
+  be verified on the live canvas — automated screenshot-based verification
+  of shaders in Pencil is a dead end.
+
 ## Still unconfirmed (resolve by minting examples)
 
 - ~~Effect-type input-raster annotation~~ — **Resolved: no shader effect type** (D9).
