@@ -1140,40 +1140,40 @@
         "name": "Polished Chrome",
         "createdAt": 1755772800000,
         "values": {
-          "u_depth": 80,
-          "u_bevel": 200,
-          "u_profile": 0.315,
+          "u_depth": 43,
+          "u_bevel": 85,
+          "u_profile": 0.17,
           "u_smoothing": 3.75,
           "u_tint": "#ffffff",
-          "u_rough": 0.28500000000000003,
-          "u_contrast": 1.31,
-          "u_fresnel": 0.98,
+          "u_rough": 0.37,
+          "u_contrast": 1.51,
+          "u_fresnel": 2,
           "u_brush": 0,
           "u_brushScale": 1,
-          "u_lightAngle": 90,
-          "u_horizon": 0.23,
-          "u_stripeFreq": 3,
-          "u_stripeAmt": 0.855,
+          "u_lightAngle": 204,
+          "u_horizon": 0.15,
+          "u_stripeFreq": 4.6000000000000005,
+          "u_stripeAmt": 1,
           "u_envRotation": 0,
           "u_envMix": 0,
           "u_envZoom": 0.9400000000000001,
           "u_sweep": 0,
-          "u_wobble": 0.895,
-          "u_wobbleScale": 2.5,
-          "u_wobbleSpeed": 0.8,
+          "u_wobble": 0,
+          "u_wobbleScale": 0.5,
+          "u_wobbleSpeed": 0,
           "u_tilt": -0.19,
           "u_env": "",
           "u_persp": 0.21,
           "u_flow": 0,
-          "u_flowRep": 1.75,
+          "u_flowRep": 2.6500000000000004,
           "u_flowAngle": 90,
           "u_flowSpeed": 0.16,
           "u_flowDistort": 0.3,
           "u_flowSoft": 0.5700000000000001,
-          "u_flowShift": 0,
-          "u_lightSpin": -24,
+          "u_flowShift": 0.8,
+          "u_lightSpin": -8,
           "u_flowContour": 0.335,
-          "u_wobbleDir": 292
+          "u_wobbleDir": 0
         }
       },
       {
@@ -1264,6 +1264,14 @@
           "u_persp": 0.35
         }
       }
+    ],
+    "pencilKeys": [
+      "u_contrast",
+      "u_tint",
+      "u_lightSpin",
+      "u_depth",
+      "u_bevel",
+      "u_profile"
     ]
   }
 }

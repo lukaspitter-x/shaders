@@ -174,6 +174,22 @@ describe('stripHiddenAnnotations', () => {
     expect(result).toContain('#define u_foo 0.0');
   });
 
+  it('keeps hidden sampler uniforms as uniforms (samplers cannot be #defined)', () => {
+    const src = [
+      '/**',
+      ' * Env image.',
+      ' * @label Env Image',
+      ' * @assets env',
+      ' */',
+      'uniform sampler2D u_env;',
+    ].join('\n');
+    const result = stripHiddenAnnotations(src, new Set(), { u_env: '' });
+    expect(result).toContain('uniform sampler2D u_env;');
+    expect(result).not.toContain('#define u_env');
+    expect(result).not.toContain('@assets'); // workbench-only directive stripped
+    expect(result).toContain('@label Env Image');
+  });
+
   it('uses current hex color value for hidden vec3', () => {
     const src = [
       '/** @label Key Color @color @default #1f6bff */',

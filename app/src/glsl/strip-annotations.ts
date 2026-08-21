@@ -22,6 +22,10 @@ export function stripHiddenAnnotations(
 
   return source.replace(RE, (full, _sectionLine, docBlock, _uniformDecl, glslType, uniformName) => {
     if (SYSTEM_RE.test(docBlock)) return full;
+    // Samplers can never be inlined as #defines — a sampler has no literal
+    // value, and `texture2D(0.0, …)` fails Pencil's transpile. Keep them as
+    // real uniforms regardless of visibility.
+    if (glslType === 'sampler2D') return downgradeBlock(full, uniformName);
     if (visibleKeys.has(uniformName)) return downgradeBlock(full, uniformName);
 
     const glslValue = toGlsl(currentValues[uniformName], glslType, docBlock);
