@@ -9,14 +9,14 @@
  * them was the source of staircase artifacts in gradient-based shading.
  * Alpha IS coverage for a rasterized shape, so it passes through untouched;
  * only luminance-derived coverage gets a steep ramp around 0.5 so flat gray
- * photo tones don't read as "near edge". The finished field is then upsampled
- * 2× with a C² B-spline so GPU bilinear sampling has smooth gradients.
+ * photo tones don't read as "near edge". The grid stays at raster resolution —
+ * smoothing happens at texture-resample time (`resampleSdfBspline`).
  *
  * SVG files bypass `createImageBitmap` (Chrome rejects SVG blobs) and load via
  * an `<img>` + object URL instead. Being vectors, they rasterize AT `maxDim`
  * rather than capped by it, so a small icon still yields a crisp SDF.
  */
-import { signedDistanceTransformAA, upsampleBspline2x } from './edt';
+import { signedDistanceTransformAA } from './edt';
 import type { NormalizedSdf } from './sdf-shapes';
 
 interface DecodedImage {
@@ -94,9 +94,9 @@ export async function imageToSdf(file: File, maxDim = 1024): Promise<NormalizedS
     }
   }
 
-  const sdfPx = upsampleBspline2x(signedDistanceTransformAA(coverage, w, h), w, h);
+  const sdfPx = signedDistanceTransformAA(coverage, w, h);
   const out = new Float32Array(sdfPx.length);
-  for (let i = 0; i < out.length; i++) out[i] = sdfPx[i] / h; // px units ÷ ORIGINAL height
+  for (let i = 0; i < out.length; i++) out[i] = sdfPx[i] / h; // normalize by height
 
-  return { width: w * 2, height: h * 2, aspect: w / h, data: out };
+  return { width: w, height: h, aspect: w / h, data: out };
 }

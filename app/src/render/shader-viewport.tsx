@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ParsedShader, ShaderValues } from '@/glsl/parse-annotations';
 import type { LintFinding } from '@/glsl/lint-pencil';
 import { createShaderRenderer, type ShaderRenderer } from './webgl-quad';
-import { generateSdf, type ShapeDef } from './sdf-shapes';
+import { generateSdf, resampleSdfBspline, type ShapeDef } from './sdf-shapes';
 
 /** Cap the SDF texture's long side (uploads yield a 2048 B-spline-upsampled grid). */
 const SDF_MAX = 2048;
@@ -109,18 +109,31 @@ export function ShaderViewport({
     }
     const { w, h } = sizeRef.current;
     if (w < 1 || h < 1) return;
+    const scale = Math.max(w, h) > SDF_MAX ? SDF_MAX / Math.max(w, h) : 1;
+    const texW = Math.max(1, Math.round(w * scale));
+    const texH = Math.max(1, Math.round(h * scale));
     // Custom uploads: fit the image into the canvas (with a small margin),
-    // scaled by the user's size dial. SDFs scale exactly: s·d(p/s).
+    // scaled by the user's size dial (exact SDF scaling: s·d(p/s)), and
+    // resample grid → texture with a C² B-spline so zoomed-in shapes don't
+    // grow sawtooth facets from bilinear gradient kinks.
+    if (def.custom && def.grid) {
+      const canvasAspect = w / h;
+      const fit =
+        Math.min(1, canvasAspect / (def.aspect ?? 1)) * 0.92 * (shapeScaleRef.current || 1);
+      const normalized = resampleSdfBspline(def.grid, texW, texH, canvasAspect, fit);
+      const px = new Float32Array(normalized.length);
+      for (let i = 0; i < px.length; i++) px[i] = normalized[i] * h;
+      r.setSdf(px, texW, texH);
+      return;
+    }
     if (def.custom) {
+      // Custom shape without a grid (shouldn't happen) — bilinear fallback.
       const canvasAspect = w / h;
       const fit =
         Math.min(1, canvasAspect / (def.aspect ?? 1)) * 0.92 * (shapeScaleRef.current || 1);
       const base = def;
-      def = { ...base, sample: (px, py) => base.sample(px / fit, py / fit) * fit };
+      def = { ...base, sample: (px2, py2) => base.sample(px2 / fit, py2 / fit) * fit };
     }
-    const scale = Math.max(w, h) > SDF_MAX ? SDF_MAX / Math.max(w, h) : 1;
-    const texW = Math.max(1, Math.round(w * scale));
-    const texH = Math.max(1, Math.round(h * scale));
     r.setSdf(generateSdf(def, texW, texH, w / h, h), texW, texH);
   };
 

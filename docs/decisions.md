@@ -311,11 +311,14 @@ undo history is in-memory only.
   IS exact coverage — squeezing it through a steepening ramp truncates most
   edge cells back to integer seeds and shows up as periodic ribs along bevels
   (a beat pattern between edge slope and which cells kept fractional values).
-  The ramp now applies only to luminance-derived coverage. Additionally the
-  field is upsampled 2× with a uniform cubic B-spline (`upsampleBspline2x`,
-  C², no overshoot, linear precision) before GPU upload, and `SDF_MAX` is
-  2048 — GPU bilinear's piecewise-constant gradients were scalloping curved
-  strokes at ~3px texels on large retina canvases.
+  The ramp now applies only to luminance-derived coverage. And the grid →
+  texture resample must be C², not bilinear: `resampleSdfBspline` (separable
+  uniform cubic B-spline, linear precision, no overshoot, ~20ms per regen)
+  replaces pointwise bilinear `sample()` for custom shapes — bilinear's
+  gradient kinks at every grid-cell boundary render as sawtooth facets as
+  soon as the size dial zooms a cell across several canvas pixels. A fixed
+  pre-upsample (tried first) only shifts the artifact one octave; smoothing
+  has to happen at resample time, where the zoom is known. `SDF_MAX` is 2048.
 - **`ShapeDef.sample` is +y-up (gl_FragCoord convention).** The upload grid's
   row 0 is the image top, so `makeCustomShape` flips (`sy = 0.5 − py`) — the
   original mapping rendered every upload upside down. Thumbnails iterate rows

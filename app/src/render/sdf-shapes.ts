@@ -19,6 +19,8 @@ export interface ShapeDef {
   custom: boolean;
   /** Source image aspect (w/h) for custom uploads — drives fit-to-canvas. */
   aspect?: number;
+  /** Custom uploads: the raw SDF grid, for high-quality texture resampling. */
+  grid?: NormalizedSdf;
   /**
    * Normalized signed distance, positive inside, in centered aspect space.
    * +py is UP (gl_FragCoord convention) — consumers that iterate rows
@@ -109,6 +111,117 @@ export interface NormalizedSdf {
   data: Float32Array;
 }
 
+/** Uniform cubic B-spline weights for fractional offset t ∈ [0,1). */
+function bsplineWeights(t: number): [number, number, number, number] {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return [
+    (1 - 3 * t + 3 * t2 - t3) / 6,
+    (4 - 6 * t2 + 3 * t3) / 6,
+    (1 + 3 * t + 3 * t2 - 3 * t3) / 6,
+    t3 / 6,
+  ];
+}
+
+const OUTSIDE = -1; // far-outside value (normalized units) for off-image texels
+
+/**
+ * Resample an uploaded shape's SDF grid into a canvas-space texture with a
+ * separable uniform cubic B-spline. This replaces bilinear `sample()` on the
+ * hot path: bilinear has gradient kinks at every grid-cell boundary, which a
+ * Sobel-normal shader renders as sawtooth facets once the shape is zoomed so
+ * one grid cell spans several canvas pixels. The B-spline kernel is C² (no
+ * kinks), never overshoots, and reproduces linear ramps — a true SDF passes
+ * through nearly unchanged.
+ *
+ * Mapping matches `makeCustomShape.sample` + the viewport's fit wrapper
+ * (`s·d(p/s)`): texture texel (i,j) → centered canvas coords (+py up) →
+ * ÷fit → image-aspect space → grid coords (row 0 = image top). Returned
+ * values are in the grid's normalized units, already multiplied by `fit`;
+ * off-image texels get `OUTSIDE·fit`.
+ */
+export function resampleSdfBspline(
+  grid: NormalizedSdf,
+  texW: number,
+  texH: number,
+  canvasAspect: number,
+  fit: number,
+): Float32Array {
+  const { width: w, height: h, aspect, data } = grid;
+
+  // Per-column and per-row taps/weights (the mapping is affine per axis).
+  const prepAxis = (nOut: number, coord: (o: number) => number, nSrc: number) => {
+    const idx = new Int32Array(nOut * 4);
+    const wgt = new Float64Array(nOut * 4);
+    const valid = new Uint8Array(nOut);
+    for (let o = 0; o < nOut; o++) {
+      const s = coord(o); // normalized 0..1 across the image
+      if (s < 0 || s > 1) continue;
+      valid[o] = 1;
+      const f = s * (nSrc - 1);
+      const i1 = Math.floor(f);
+      const ws = bsplineWeights(f - i1);
+      for (let k = 0; k < 4; k++) {
+        idx[o * 4 + k] = Math.min(nSrc - 1, Math.max(0, i1 - 1 + k));
+        wgt[o * 4 + k] = ws[k];
+      }
+    }
+    return { idx, wgt, valid };
+  };
+
+  const X = prepAxis(
+    texW,
+    (i) => (((i + 0.5) / texW - 0.5) * canvasAspect) / fit / aspect + 0.5,
+    w,
+  );
+  const Y = prepAxis(
+    texH,
+    // +py up; grid row 0 is the image top → sy = 0.5 − py.
+    (j) => 0.5 - ((j + 0.5) / texH - 0.5) / fit,
+    h,
+  );
+
+  // Horizontal pass: texW × h.
+  const tmp = new Float32Array(texW * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let i = 0; i < texW; i++) {
+      if (!X.valid[i]) continue;
+      const b = i * 4;
+      tmp[y * texW + i] =
+        data[row + X.idx[b]] * X.wgt[b] +
+        data[row + X.idx[b + 1]] * X.wgt[b + 1] +
+        data[row + X.idx[b + 2]] * X.wgt[b + 2] +
+        data[row + X.idx[b + 3]] * X.wgt[b + 3];
+    }
+  }
+
+  // Vertical pass: texW × texH.
+  const out = new Float32Array(texW * texH);
+  for (let j = 0; j < texH; j++) {
+    const b = j * 4;
+    const rowOut = j * texW;
+    if (!Y.valid[j]) {
+      for (let i = 0; i < texW; i++) out[rowOut + i] = OUTSIDE * fit;
+      continue;
+    }
+    const r0 = Y.idx[b] * texW;
+    const r1 = Y.idx[b + 1] * texW;
+    const r2 = Y.idx[b + 2] * texW;
+    const r3 = Y.idx[b + 3] * texW;
+    for (let i = 0; i < texW; i++) {
+      out[rowOut + i] = X.valid[i]
+        ? (tmp[r0 + i] * Y.wgt[b] +
+            tmp[r1 + i] * Y.wgt[b + 1] +
+            tmp[r2 + i] * Y.wgt[b + 2] +
+            tmp[r3 + i] * Y.wgt[b + 3]) *
+          fit
+        : OUTSIDE * fit;
+    }
+  }
+  return out;
+}
+
 /** Wrap an uploaded image's SDF as a ShapeDef (bilinear, centered at its aspect). */
 export function makeCustomShape(sdf: NormalizedSdf, id: string, label: string): ShapeDef {
   const { width: w, height: h, aspect, data } = sdf;
@@ -118,6 +231,7 @@ export function makeCustomShape(sdf: NormalizedSdf, id: string, label: string): 
     label,
     custom: true,
     aspect,
+    grid: sdf,
     sample: (px, py) => {
       const sx = px / aspect + 0.5;
       // Grid row 0 is the image TOP; +py is up — flip so the image isn't
