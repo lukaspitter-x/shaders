@@ -307,6 +307,25 @@ undo history is in-memory only.
   coverage, and the field comes out sub-pixel smooth. A steep ramp
   (`(v−0.35)/0.3`) still flattens interior tones so photos don't read "near
   edge" everywhere.
+- **The AA edge must survive the whole pipeline untouched.** Rasterizer alpha
+  IS exact coverage — squeezing it through a steepening ramp truncates most
+  edge cells back to integer seeds and shows up as periodic ribs along bevels
+  (a beat pattern between edge slope and which cells kept fractional values).
+  The ramp now applies only to luminance-derived coverage. Additionally the
+  field is upsampled 2× with a uniform cubic B-spline (`upsampleBspline2x`,
+  C², no overshoot, linear precision) before GPU upload, and `SDF_MAX` is
+  2048 — GPU bilinear's piecewise-constant gradients were scalloping curved
+  strokes at ~3px texels on large retina canvases.
+- **`ShapeDef.sample` is +y-up (gl_FragCoord convention).** The upload grid's
+  row 0 is the image top, so `makeCustomShape` flips (`sy = 0.5 − py`) — the
+  original mapping rendered every upload upside down. Thumbnails iterate rows
+  top-down and flip again. Builtins are y-symmetric, which is why this went
+  unnoticed until an asymmetric logo.
+- **Uploads persist via `/api/shapes`** (`src/data/shapes.local.json`,
+  gitignored) — the ORIGINAL file as a data URL, not the computed SDF, so
+  restore re-runs the pipeline and old uploads inherit later improvements.
+  Selection restore (`shapeKey`) now accepts custom ids and re-resolves when
+  the async restore lands; the size dial persists in `shapeScales`.
 - **Custom shapes fit-to-canvas in the viewport, not in the SDF data.** An
   upload maps its full height onto the canvas and overflows horizontally when
   its aspect is wider — a wide logo cropped. `regenerateSdf` wraps custom

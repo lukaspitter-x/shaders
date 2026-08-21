@@ -20,6 +20,12 @@ import { lintPencil } from '@/glsl/lint-pencil';
 import { ShaderViewport } from '@/render/shader-viewport';
 import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
 import { imageToSdf } from '@/render/image-sdf';
+import {
+  fileToDataUrl,
+  loadStoredShapes,
+  persistShape,
+  storedShapeToFile,
+} from '@/render/shape-store';
 import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
 import {
   bakeDefaults,
@@ -42,8 +48,10 @@ const PREVIEW_SCALES: { value: PreviewScale; label: string }[] = [
   { value: 4, label: '4x' },
 ];
 
-const isUsableShapeId = (id: string | null): id is string =>
-  id === 'none' || BUILTIN_SHAPES.some((s) => s.id === id);
+const isUsableShapeId = (id: string | null, shapes: ShapeDef[]): id is string =>
+  id === 'none' || shapes.some((s) => s.id === id);
+
+const labelFromFileName = (name: string) => name.replace(/\.[^.]+$/, '') || 'Custom';
 
 export default function App() {
   const [selectedId, setSelectedId] = useState<string | undefined>(() => {
@@ -60,8 +68,35 @@ export default function App() {
 
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
   const [shapeId, setShapeId] = useState('none');
-  const [shapeScales, setShapeScales] = useState<Record<string, number>>({});
+  const [shapeScales, setShapeScales] = useState<Record<string, number>>(() =>
+    readJson('shapeScales', {}),
+  );
+  useEffect(() => {
+    writeJson('shapeScales', shapeScales);
+  }, [shapeScales]);
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
+
+  // Restore persisted uploads on startup: rebuild each SDF from the stored
+  // original file, so pipeline improvements apply to old uploads too.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await loadStoredShapes();
+      const defs: ShapeDef[] = [];
+      for (const s of stored) {
+        try {
+          const sdf = await imageToSdf(await storedShapeToFile(s));
+          defs.push(makeCustomShape(sdf, s.id, s.label));
+        } catch (err) {
+          console.error('[shapes] restore failed for', s.label, err);
+        }
+      }
+      if (!cancelled && defs.length) setCustomShapes((prev) => [...defs, ...prev]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
@@ -90,7 +125,8 @@ export default function App() {
     parsed?.schema,
   );
 
-  // Restore shape on shader switch.
+  // Restore shape on shader switch (and when async-restored uploads arrive,
+  // so a persisted custom selection can win over the interim fallback).
   useEffect(() => {
     if (!parsed || !selected) {
       setShapeId('none');
@@ -98,13 +134,13 @@ export default function App() {
     }
     const storedShape = readJson<string | null>(shapeKey(selected.id), null);
     setShapeId(
-      isUsableShapeId(storedShape)
+      isUsableShapeId(storedShape, shapes)
         ? storedShape
         : parsed.system.sdf
           ? 'rounded-rect'
           : 'none',
     );
-  }, [parsed, selected]);
+  }, [parsed, selected, shapes]);
 
   const selectShape = (id: string) => {
     setShapeId(id);
@@ -119,9 +155,13 @@ export default function App() {
     try {
       const sdf = await imageToSdf(file);
       const id = `custom-${Date.now()}`;
-      const label = file.name.replace(/\.[^.]+$/, '') || 'Custom';
+      const label = labelFromFileName(file.name);
       setCustomShapes((prev) => [...prev, makeCustomShape(sdf, id, label)]);
-      setShapeId(id);
+      selectShape(id);
+      // Write-through persistence (best-effort — the shape works either way).
+      void fileToDataUrl(file)
+        .then((dataUrl) => persistShape({ id, label, name: file.name, type: file.type, dataUrl }))
+        .catch((err) => console.error('[shape persist]', err));
     } catch (err) {
       console.error('[shape upload]', err);
     }

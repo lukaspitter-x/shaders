@@ -97,6 +97,78 @@ export function signedDistanceTransformAA(
   return out;
 }
 
+/**
+ * Upsample a scalar field 2× with a separable uniform cubic B-spline. The
+ * B-spline kernel is C² and never overshoots, so the upsampled field has
+ * smooth first derivatives — exactly what gradient-based shading needs. (GPU
+ * bilinear over the raw grid has piecewise-constant gradients per texel,
+ * which reads as scalloped facets once a shader amplifies the normal.)
+ * Output is `2w × 2h`, texel-center aligned (`src = (dst + 0.5)/2 − 0.5`).
+ */
+export function upsampleBspline2x(data: Float32Array, w: number, h: number): Float32Array {
+  const w2 = w * 2;
+  const h2 = h * 2;
+
+  // Per-output-coordinate taps and weights (identical for every row/column).
+  const prep = (n: number) => {
+    const idx = new Int32Array(n * 2 * 4);
+    const wgt = new Float64Array(n * 2 * 4);
+    for (let o = 0; o < n * 2; o++) {
+      const f = (o + 0.5) / 2 - 0.5;
+      const i1 = Math.floor(f);
+      const t = f - i1;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const ws = [
+        (1 - 3 * t + 3 * t2 - t3) / 6,
+        (4 - 6 * t2 + 3 * t3) / 6,
+        (1 + 3 * t + 3 * t2 - 3 * t3) / 6,
+        t3 / 6,
+      ];
+      for (let k = 0; k < 4; k++) {
+        idx[o * 4 + k] = Math.min(n - 1, Math.max(0, i1 - 1 + k));
+        wgt[o * 4 + k] = ws[k];
+      }
+    }
+    return { idx, wgt };
+  };
+
+  const X = prep(w);
+  const Y = prep(h);
+
+  // Horizontal pass: w2 × h.
+  const tmp = new Float32Array(w2 * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let ox = 0; ox < w2; ox++) {
+      const b = ox * 4;
+      tmp[y * w2 + ox] =
+        data[row + X.idx[b]] * X.wgt[b] +
+        data[row + X.idx[b + 1]] * X.wgt[b + 1] +
+        data[row + X.idx[b + 2]] * X.wgt[b + 2] +
+        data[row + X.idx[b + 3]] * X.wgt[b + 3];
+    }
+  }
+
+  // Vertical pass: w2 × h2.
+  const out = new Float32Array(w2 * h2);
+  for (let oy = 0; oy < h2; oy++) {
+    const b = oy * 4;
+    const r0 = Y.idx[b] * w2;
+    const r1 = Y.idx[b + 1] * w2;
+    const r2 = Y.idx[b + 2] * w2;
+    const r3 = Y.idx[b + 3] * w2;
+    for (let ox = 0; ox < w2; ox++) {
+      out[oy * w2 + ox] =
+        tmp[r0 + ox] * Y.wgt[b] +
+        tmp[r1 + ox] * Y.wgt[b + 1] +
+        tmp[r2 + ox] * Y.wgt[b + 2] +
+        tmp[r3 + ox] * Y.wgt[b + 3];
+    }
+  }
+  return out;
+}
+
 export function signedDistanceTransform(mask: Uint8Array, w: number, h: number): Float32Array {
   const toInside = new Float64Array(w * h);
   const toOutside = new Float64Array(w * h);

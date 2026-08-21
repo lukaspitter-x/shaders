@@ -19,7 +19,11 @@ export interface ShapeDef {
   custom: boolean;
   /** Source image aspect (w/h) for custom uploads — drives fit-to-canvas. */
   aspect?: number;
-  /** Normalized signed distance, positive inside, in centered aspect space. */
+  /**
+   * Normalized signed distance, positive inside, in centered aspect space.
+   * +py is UP (gl_FragCoord convention) — consumers that iterate rows
+   * top-down (thumbnails) must flip.
+   */
   sample: (px: number, py: number) => number;
 }
 
@@ -116,7 +120,9 @@ export function makeCustomShape(sdf: NormalizedSdf, id: string, label: string): 
     aspect,
     sample: (px, py) => {
       const sx = px / aspect + 0.5;
-      const sy = py + 0.5;
+      // Grid row 0 is the image TOP; +py is up — flip so the image isn't
+      // rendered upside down under gl_FragCoord's bottom-up y.
+      const sy = 0.5 - py;
       if (sx < 0 || sx > 1 || sy < 0 || sy > 1) return OUTSIDE;
       const fx = sx * (w - 1);
       const fy = sy * (h - 1);
@@ -149,7 +155,8 @@ export function drawShapeThumbnail(canvas: HTMLCanvasElement, shape: ShapeDef | 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const px = (x + 0.5) / size - 0.5;
-      const py = (y + 0.5) / size - 0.5;
+      // Canvas rows go top-down; sample() expects +py up.
+      const py = 0.5 - (y + 0.5) / size;
       // None → full background: fill the whole tile.
       const d = shape ? shape.sample(px, py) : 0.5;
       const alpha = Math.max(0, Math.min(1, d * size * 1.4 + 0.5));

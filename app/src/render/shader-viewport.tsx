@@ -4,8 +4,8 @@ import type { LintFinding } from '@/glsl/lint-pencil';
 import { createShaderRenderer, type ShaderRenderer } from './webgl-quad';
 import { generateSdf, type ShapeDef } from './sdf-shapes';
 
-/** Cap the SDF texture's long side (matches the upload raster in image-sdf). */
-const SDF_MAX = 1024;
+/** Cap the SDF texture's long side (uploads yield a 2048 B-spline-upsampled grid). */
+const SDF_MAX = 2048;
 
 /**
  * The shader preview. Owns the canvas, the animation clock, and the render

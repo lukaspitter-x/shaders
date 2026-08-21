@@ -6,14 +6,17 @@
  * Coverage heuristic: if the image has transparency, inside = alpha; otherwise
  * inside = darkness (black silhouette on white). Anti-aliased edge pixels are
  * kept FRACTIONAL and fed to the sub-pixel distance transform — binarizing
- * them was the source of staircase artifacts in gradient-based shading. A
- * steep ramp around 0.5 keeps flat non-edge tones from reading as "near edge".
+ * them was the source of staircase artifacts in gradient-based shading.
+ * Alpha IS coverage for a rasterized shape, so it passes through untouched;
+ * only luminance-derived coverage gets a steep ramp around 0.5 so flat gray
+ * photo tones don't read as "near edge". The finished field is then upsampled
+ * 2× with a C² B-spline so GPU bilinear sampling has smooth gradients.
  *
  * SVG files bypass `createImageBitmap` (Chrome rejects SVG blobs) and load via
  * an `<img>` + object URL instead. Being vectors, they rasterize AT `maxDim`
  * rather than capped by it, so a small icon still yields a crisp SDF.
  */
-import { signedDistanceTransformAA } from './edt';
+import { signedDistanceTransformAA, upsampleBspline2x } from './edt';
 import type { NormalizedSdf } from './sdf-shapes';
 
 interface DecodedImage {
@@ -78,21 +81,22 @@ export async function imageToSdf(file: File, maxDim = 1024): Promise<NormalizedS
 
   const coverage = new Float32Array(w * h);
   for (let p = 0, i = 0; p < coverage.length; p++, i += 4) {
-    let v: number;
     if (hasAlpha) {
-      v = data[i + 3] / 255;
+      // Rasterizer alpha IS exact coverage — pass it through untouched.
+      // (Narrowing it through a ramp discards sub-pixel edge information and
+      // shows up as periodic ribs along edges.)
+      coverage[p] = data[i + 3] / 255;
     } else {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      v = 1 - lum / 255;
+      // Steep ramp: keeps the anti-aliased edge fractional while flattening
+      // interior gray tones to solid 0/1.
+      coverage[p] = Math.min(1, Math.max(0, (1 - lum / 255 - 0.35) / 0.3));
     }
-    // Steep ramp: preserves the fractional anti-aliased edge (which crosses
-    // 0.5 within a pixel) while flattening interior tones to solid 0/1.
-    coverage[p] = Math.min(1, Math.max(0, (v - 0.35) / 0.3));
   }
 
-  const sdfPx = signedDistanceTransformAA(coverage, w, h);
-  const out = new Float32Array(w * h);
-  for (let i = 0; i < out.length; i++) out[i] = sdfPx[i] / h; // normalize by height
+  const sdfPx = upsampleBspline2x(signedDistanceTransformAA(coverage, w, h), w, h);
+  const out = new Float32Array(sdfPx.length);
+  for (let i = 0; i < out.length; i++) out[i] = sdfPx[i] / h; // px units ÷ ORIGINAL height
 
-  return { width: w, height: h, aspect: w / h, data: out };
+  return { width: w * 2, height: h * 2, aspect: w / h, data: out };
 }

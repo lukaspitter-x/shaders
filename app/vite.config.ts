@@ -62,6 +62,7 @@ export default defineConfig({
     react(),
     saveJsonPlugin('/api/sessions', 'src/data/sessions.json'),
     saveJsonPlugin('/api/working', 'src/data/sessions.local.json'),
+    saveJsonPlugin('/api/shapes', 'src/data/shapes.local.json'),
   ],
   resolve: {
     alias: {
