@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Upload } from 'lucide-react';
+import { ChevronDown, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
@@ -33,12 +33,15 @@ export function ShapePicker({
   value,
   onSelect,
   onUpload,
+  onDelete,
   requiresShape = false,
 }: {
   shapes: ShapeDef[];
   value: string;
   onSelect: (id: string) => void;
   onUpload: (file: File) => void;
+  /** Delete a custom (uploaded) shape. Built-ins are not deletable. */
+  onDelete?: (id: string) => void;
   requiresShape?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -71,23 +74,45 @@ export function ShapePicker({
       <PopoverContent align="end" className="w-[264px] p-2">
         <div className="grid grid-cols-3 gap-2">
           {tiles.map((t) => (
-            <button
+            <div
               key={t.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 onSelect(t.id);
                 setOpen(false);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(t.id);
+                  setOpen(false);
+                }
+              }}
               className={cn(
-                'flex flex-col items-center gap-1 rounded-md border p-2 outline-none transition-colors hover:bg-accent',
+                'group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border p-2 outline-none transition-colors hover:bg-accent',
                 t.id === value ? 'border-foreground/40 bg-accent' : 'border-border',
               )}
             >
+              {t.def?.custom && onDelete && (
+                <button
+                  type="button"
+                  aria-label={`Delete ${t.label}`}
+                  title={`Delete ${t.label}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(t.id);
+                  }}
+                  className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:text-destructive group-hover:flex"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
               <ShapeThumb shape={t.def} size={40} />
               <span className="w-full truncate text-center text-[10px] text-muted-foreground">
                 {t.label}
               </span>
-            </button>
+            </div>
           ))}
           <button
             type="button"

@@ -329,6 +329,21 @@ undo history is in-memory only.
   restore re-runs the pipeline and old uploads inherit later improvements.
   Selection restore (`shapeKey`) now accepts custom ids and re-resolves when
   the async restore lands; the size dial persists in `shapeScales`.
+- **Viewport view modes (Fill / SDF / Env)** — workbench-only debug shaders
+  (`render/view-modes.ts`) swapped into the viewport in place of the
+  experiment; settings, lint, and export always follow the experiment. The
+  SDF view draws iso bands + the zero crossing (also a field-quality check);
+  the Env view is an equirect panorama of chrome's procedural studio,
+  sharing chrome's uniform NAMES so live dial values flow straight in — a
+  test guards that name contract. Env mode passes `shape=null` so the
+  panorama isn't clipped to the host silhouette. Gating: SDF needs
+  `@sdf`; Env needs the full dial set (`envPreviewAvailable`).
+- **Custom shape delete** — × on hover in the picker (custom tiles only);
+  removes from the session, the persisted store, and the scale map, and
+  falls back to `rounded-rect` if the deleted shape was selected. Known
+  limitation: the shape store is whole-file read-modify-write, so two tabs
+  mutating simultaneously can drop a concurrent write (same trade-off as the
+  presets working store).
 - **Custom shapes fit-to-canvas in the viewport, not in the SDF data.** An
   upload maps its full height onto the canvas and overflows horizontally when
   its aspect is wider — a wide logo cropped. `regenerateSdf` wraps custom

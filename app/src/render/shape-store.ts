@@ -55,6 +55,18 @@ export async function persistShape(shape: StoredShape): Promise<void> {
   if (!res.ok) throw new Error(`persist shape failed: ${res.status}`);
 }
 
+export async function removeStoredShape(id: string): Promise<void> {
+  const store = await getStore();
+  if (!(id in store)) return;
+  delete store[id];
+  const res = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(store),
+  });
+  if (!res.ok) throw new Error(`remove shape failed: ${res.status}`);
+}
+
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

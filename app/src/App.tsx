@@ -24,8 +24,17 @@ import {
   fileToDataUrl,
   loadStoredShapes,
   persistShape,
+  removeStoredShape,
   storedShapeToFile,
 } from '@/render/shape-store';
+import {
+  ENV_VIEW_PARSED,
+  ENV_VIEW_SOURCE,
+  SDF_VIEW_PARSED,
+  SDF_VIEW_SOURCE,
+  envPreviewAvailable,
+  type ViewMode,
+} from '@/render/view-modes';
 import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
 import {
   bakeDefaults,
@@ -173,6 +182,37 @@ export default function App() {
 
   const shapeScale = selectedShape?.custom ? (shapeScales[selectedShape.id] ?? 1) : 1;
 
+  const onDeleteShape = (id: string) => {
+    setCustomShapes((prev) => prev.filter((s) => s.id !== id));
+    setShapeScales((prev) => {
+      const { [id]: _removed, ...rest } = prev;
+      return rest;
+    });
+    if (shapeId === id) selectShape(requiresShape ? 'rounded-rect' : 'none');
+    void removeStoredShape(id).catch((err) => console.error('[shape delete]', err));
+  };
+
+  // Viewport view mode: the experiment itself, its host SDF, or the chrome
+  // env panorama. Debug modes swap only the VIEWPORT shader — settings, lint,
+  // and export always follow the experiment.
+  const [viewMode, setViewMode] = useLocalStorage<ViewMode>('viewMode', 'fill');
+  const canSdfView = !!parsed?.system.sdf;
+  const canEnvView = envPreviewAvailable(parsed);
+  useEffect(() => {
+    if ((viewMode === 'sdf' && !canSdfView) || (viewMode === 'env' && !canEnvView)) {
+      setViewMode('fill');
+    }
+  }, [viewMode, canSdfView, canEnvView, setViewMode]);
+  const viewParsed = viewMode === 'sdf' ? SDF_VIEW_PARSED : viewMode === 'env' ? ENV_VIEW_PARSED : parsed;
+  const viewSource =
+    viewMode === 'sdf' ? SDF_VIEW_SOURCE : viewMode === 'env' ? ENV_VIEW_SOURCE : selected?.source;
+
+  const VIEW_MODES: { value: ViewMode; label: string; enabled: boolean; title: string }[] = [
+    { value: 'fill', label: 'Fill', enabled: true, title: 'Render the shader' },
+    { value: 'sdf', label: 'SDF', enabled: canSdfView, title: 'Inspect the host shape distance field' },
+    { value: 'env', label: 'Env', enabled: canEnvView, title: 'Preview the procedural environment' },
+  ];
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -266,6 +306,26 @@ export default function App() {
           onRedo={presetStore.redo}
         />
         {selected && <LintBadge findings={lint} />}
+        {selected && (canSdfView || canEnvView) && (
+          <div className="flex rounded-md border border-border p-0.5">
+            {VIEW_MODES.filter((m) => m.enabled).map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                title={m.title}
+                onClick={() => setViewMode(m.value)}
+                className={cn(
+                  'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+                  viewMode === m.value
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           {selected && (
@@ -276,6 +336,7 @@ export default function App() {
                 value={shapeId}
                 onSelect={selectShape}
                 onUpload={onUploadShape}
+                onDelete={onDeleteShape}
                 requiresShape={requiresShape}
               />
               {selectedShape?.custom && (
@@ -339,17 +400,17 @@ export default function App() {
 
       <div className="relative flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6">
-          {selected && parsed ? (
+          {selected && parsed && viewParsed && viewSource ? (
             <div className="h-full w-full overflow-hidden rounded-lg border border-border">
-              <ErrorBoundary key={selected.id} label="Viewport crashed">
+              <ErrorBoundary key={`${selected.id}:${viewMode}`} label="Viewport crashed">
                 <ShaderViewport
-                  parsed={parsed}
-                  fragSource={selected.source}
+                  parsed={viewParsed}
+                  fragSource={viewSource}
                   values={presetStore.values}
                   running={running}
-                  shape={selectedShape}
+                  shape={viewMode === 'env' ? null : selectedShape}
                   shapeScale={shapeScale}
-                  lint={lint}
+                  lint={viewMode === 'fill' ? lint : []}
                   previewScale={hasGrid ? previewScale : 'full'}
                 />
               </ErrorBoundary>
