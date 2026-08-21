@@ -119,6 +119,7 @@ function ControlRendererImpl<S>({
           label={control.label}
           hint={control.hint}
           value={v as string}
+          assets={control.assets}
           onChange={set}
           onReset={onReset}
         />

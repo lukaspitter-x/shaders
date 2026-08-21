@@ -1168,14 +1168,15 @@
           "u_stripeFreq": 5,
           "u_stripeAmt": 0.55,
           "u_envRotation": 20,
-          "u_envMix": 0,
+          "u_envMix": 0.35,
           "u_envZoom": 1,
           "u_sweep": 8,
           "u_wobble": 0.55,
           "u_wobbleScale": 3,
           "u_wobbleSpeed": 0.7,
           "u_tilt": 0.1,
-          "u_persp": 0.5
+          "u_persp": 0.5,
+          "u_env": "/env/brown-studio.jpg"
         }
       },
       {

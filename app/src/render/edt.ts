@@ -57,6 +57,46 @@ function edt2dSq(cost: Float64Array, w: number, h: number): Float64Array {
  * Signed distance (in pixels) from a binary mask: **positive inside**
  * (`mask !== 0`), negative outside, ~0 at the boundary. Exact Euclidean.
  */
+/**
+ * Signed distance (in pixels) from an anti-aliased coverage field (0..1,
+ * 1 = fully inside): **positive inside**, negative outside. Fractional edge
+ * cells seed the transform at sub-pixel offsets (tiny-sdf style:
+ * `(|a - 0.5|)²` as the squared distance from the cell center to the
+ * boundary), so a smoothly rasterized edge yields a smooth field instead of
+ * the integer staircase a binary mask produces. Reduces exactly to
+ * `signedDistanceTransform` for 0/1 coverage.
+ */
+export function signedDistanceTransformAA(
+  coverage: Float32Array,
+  w: number,
+  h: number,
+): Float32Array {
+  const toInside = new Float64Array(w * h);
+  const toOutside = new Float64Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const a = Math.min(1, Math.max(0, coverage[i]));
+    if (a >= 1) {
+      toInside[i] = 0;
+      toOutside[i] = INF;
+    } else if (a <= 0) {
+      toInside[i] = INF;
+      toOutside[i] = 0;
+    } else {
+      const din = Math.max(0, 0.5 - a);
+      const dout = Math.max(0, a - 0.5);
+      toInside[i] = din * din;
+      toOutside[i] = dout * dout;
+    }
+  }
+  const dInside = edt2dSq(toInside, w, h);
+  const dOutside = edt2dSq(toOutside, w, h);
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    out[i] = Math.sqrt(dOutside[i]) - Math.sqrt(dInside[i]);
+  }
+  return out;
+}
+
 export function signedDistanceTransform(mask: Uint8Array, w: number, h: number): Float32Array {
   const toInside = new Float64Array(w * h);
   const toOutside = new Float64Array(w * h);

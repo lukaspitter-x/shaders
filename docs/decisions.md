@@ -297,9 +297,31 @@ undo history is in-memory only.
   workbench preset survives the paste into Pencil.
 - **SVG uploads rasterize via `<img>` + object URL** — Chrome's
   `createImageBitmap` rejects SVG blobs. Vector inputs rasterize AT `maxDim`
-  (now 512, matching the viewport's `SDF_MAX`) instead of being capped by
-  intrinsic size; a 256 grid under a 512 texture was the source of visible
-  stair-stepping in gradient-based normals.
+  (now 1024, matching the viewport's `SDF_MAX`) instead of being capped by
+  intrinsic size.
+- **Binary masks are the enemy of gradient shading.** Thresholding the upload
+  at alpha≥128 before the EDT quantizes the boundary to integer pixels — under
+  a Sobel-normal shader that reads as hard stair-stepped bevels no smoothing
+  dial can fix. `signedDistanceTransformAA` (tiny-sdf-style: fractional edge
+  cells seed the transform at `(|a−0.5|)²`) keeps the rasterizer's anti-aliased
+  coverage, and the field comes out sub-pixel smooth. A steep ramp
+  (`(v−0.35)/0.3`) still flattens interior tones so photos don't read "near
+  edge" everywhere.
+- **Custom shapes fit-to-canvas in the viewport, not in the SDF data.** An
+  upload maps its full height onto the canvas and overflows horizontally when
+  its aspect is wider — a wide logo cropped. `regenerateSdf` wraps custom
+  shapes with `s·d(p/s)` (exact SDF scaling), s = fit-to-canvas × a header
+  size slider shown only for custom shapes. Pencil-side this doesn't exist:
+  the layer IS the shape.
+- **Env-map presets: `@assets <group>`** — a workbench-only directive on a
+  `sampler2D` (stripped by the export downgrade, like `@select`/`@step`) that
+  renders a bundled quick-pick grid under the image control; the manifest is
+  `src/data/env-presets.ts`. **Licensing split**: the GSG Pro Studios Metal
+  conversions live in gitignored `public/env-local/` (EULA forbids
+  redistribution; this repo is public — same policy as flip's `hdri-local/`),
+  regenerated via `scripts/hdr-to-env.js` (RGBE decode → Reinhard → BMP →
+  sips). Poly Haven CC0 maps commit normally to `public/env/`. Missing local
+  tiles hide via img `onerror`.
 - **Fake a 3D normal from a 2D circle for cheap "lit sphere" looks.** `thermal`
   gets Fresnel/diffuse/corona on a sphere without raymarching: for a pixel at
   normalized radius `r` inside the projected circle, `z = sqrt(1 - r*r)` and

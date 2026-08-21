@@ -1,32 +1,43 @@
 import { useRef } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/cn';
+import { ASSET_GROUPS } from '@/data/env-presets';
 import { Field } from './field';
+
+/** Only blob: URLs are ours to revoke — preset urls are static assets. */
+const revokeIfBlob = (url: string) => {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+};
 
 export function ImageControl({
   label,
   hint,
   value,
+  assets,
   onChange,
   onReset,
 }: {
   label: string;
   hint?: string;
   value: string;
+  /** Bundled quick-pick group key (see data/env-presets.ts). */
+  assets?: string;
   onChange: (v: string) => void;
   onReset?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const presets = assets ? ASSET_GROUPS[assets] : undefined;
 
   const onFile = (file: File) => {
     if (!file.type.startsWith('image/')) return;
     const url = URL.createObjectURL(file);
-    if (value) URL.revokeObjectURL(value);
+    if (value) revokeIfBlob(value);
     onChange(url);
   };
 
   const onClear = () => {
-    if (value) URL.revokeObjectURL(value);
+    if (value) revokeIfBlob(value);
     onChange('');
   };
 
@@ -78,6 +89,38 @@ export function ImageControl({
           <ImagePlus className="h-4 w-4" />
           Choose image
         </button>
+      )}
+      {presets && (
+        <div className="mt-1.5 grid max-h-28 grid-cols-4 gap-1 overflow-y-auto pr-0.5">
+          {presets.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              title={p.label}
+              onClick={() => {
+                if (value) revokeIfBlob(value);
+                onChange(value === p.url ? '' : p.url);
+              }}
+              className={cn(
+                'overflow-hidden rounded border transition-colors',
+                value === p.url
+                  ? 'border-foreground'
+                  : 'border-input hover:border-foreground/40',
+              )}
+            >
+              <img
+                src={p.url}
+                alt={p.label}
+                loading="lazy"
+                className="h-7 w-full object-cover"
+                onError={(e) => {
+                  // Licensed local assets may be absent — hide their tiles.
+                  (e.currentTarget.parentElement as HTMLElement).style.display = 'none';
+                }}
+              />
+            </button>
+          ))}
+        </div>
       )}
     </Field>
   );

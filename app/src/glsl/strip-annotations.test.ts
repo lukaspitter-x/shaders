@@ -95,6 +95,21 @@ describe('bakeDefaults', () => {
     expect(result).toContain('@default 0.5, 0.0, 1.0, 1.0');
   });
 
+  it('downgrade strips the workbench-only @assets directive', () => {
+    const src = [
+      '/**',
+      ' * Env image.',
+      ' * @label Env Image',
+      ' * @assets env',
+      ' */',
+      'uniform sampler2D u_env;',
+    ].join('\n');
+    const result = downgradePencilDirectives(src);
+    expect(result).not.toContain('@assets');
+    expect(result).toContain('@label Env Image');
+    expect(result).toContain('uniform sampler2D u_env;');
+  });
+
   it('baked output then export path still lints clean', () => {
     const src = [
       '/** @label Speed @default 0.4 @range 0, 2 */',

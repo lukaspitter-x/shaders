@@ -60,6 +60,7 @@ export default function App() {
 
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
   const [shapeId, setShapeId] = useState('none');
+  const [shapeScales, setShapeScales] = useState<Record<string, number>>({});
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
@@ -129,6 +130,8 @@ export default function App() {
   const onChange = (key: string, value: ShaderValues[string]) => {
     presetStore.setValue(key, value);
   };
+
+  const shapeScale = selectedShape?.custom ? (shapeScales[selectedShape.id] ?? 1) : 1;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -235,6 +238,27 @@ export default function App() {
                 onUpload={onUploadShape}
                 requiresShape={requiresShape}
               />
+              {selectedShape?.custom && (
+                <input
+                  type="range"
+                  min={0.25}
+                  max={2}
+                  step={0.05}
+                  value={shapeScale}
+                  title={`Shape size ×${shapeScale.toFixed(2)} — double-click to reset`}
+                  aria-label="Shape size"
+                  className="w-24 accent-foreground"
+                  onChange={(e) =>
+                    setShapeScales((prev) => ({
+                      ...prev,
+                      [selectedShape.id]: Number(e.target.value),
+                    }))
+                  }
+                  onDoubleClick={() =>
+                    setShapeScales((prev) => ({ ...prev, [selectedShape.id]: 1 }))
+                  }
+                />
+              )}
             </>
           )}
           {selected && (
@@ -284,6 +308,7 @@ export default function App() {
                   values={presetStore.values}
                   running={running}
                   shape={selectedShape}
+                  shapeScale={shapeScale}
                   lint={lint}
                   previewScale={hasGrid ? previewScale : 'full'}
                 />

@@ -47,7 +47,11 @@ export type Control<S, K extends keyof S = keyof S> = K extends keyof S
           step?: number;
           unit?: string;
         })
-      | (ControlBase<S, K> & { kind: 'image' })
+      | (ControlBase<S, K> & {
+          kind: 'image';
+          /** Bundled quick-pick group (see data/env-presets.ts), e.g. 'env'. */
+          assets?: string;
+        })
       | (ControlBase<S, K> & { kind: 'bezier' })
       | (ControlBase<S, K> & { kind: 'envelope' })
   : never;

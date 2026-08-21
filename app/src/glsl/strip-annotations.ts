@@ -82,6 +82,7 @@ function formatBakedDefault(value: ShaderValues[string] | undefined): string | n
  *   options after the uniform (Pencil ignores line comments).
  * - `@switch` → `@range 0, 1`, with `@default true/false` numified.
  * - `@step x` → dropped (slider granularity is a workbench nicety).
+ * - `@assets g` → dropped (bundled quick-pick images are a workbench nicety).
  *
  * The workbench panel keeps the richer controls — it parses the authored
  * source; only the export path (and the lint badge) see the downgraded form.
@@ -118,6 +119,7 @@ function downgradeBlock(block: string, uniformName: string): string {
   }
 
   block = block.replace(/@step\s+[^@]*?(?=@|\*\/)/, '');
+  block = block.replace(/@assets\s+[^@]*?(?=@|\*\/)/, '');
   return block;
 }
 

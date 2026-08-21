@@ -165,6 +165,7 @@ uniform float u_persp;
 /**
  * Optional environment image reflected by the surface (sphere-mapped).
  * @label Env Image
+ * @assets env
  */
 uniform sampler2D u_env;
 

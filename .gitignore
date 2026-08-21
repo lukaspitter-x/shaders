@@ -4,3 +4,7 @@ dist/
 .DS_Store
 *.local
 sessions.local.json
+
+# Licensed env maps (GSG Pro Studios Metal) — local only, never commit
+app/public/env-local/*
+!app/public/env-local/README.md

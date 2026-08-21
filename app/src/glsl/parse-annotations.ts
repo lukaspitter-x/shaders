@@ -212,7 +212,7 @@ export function parseShader(source: string): ParsedShader {
     } else if (glslType === 'sampler2D') {
       u.control = 'image';
       u.default = '';
-      schema.push({ key: name, label, hint, kind: 'image' });
+      schema.push({ key: name, label, hint, kind: 'image', assets: values.assets });
       images.push(name);
     }
     // (Unsupported user types fall through with no control — added as needed.)

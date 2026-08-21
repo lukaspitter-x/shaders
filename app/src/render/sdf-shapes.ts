@@ -17,6 +17,8 @@ export interface ShapeDef {
   id: string;
   label: string;
   custom: boolean;
+  /** Source image aspect (w/h) for custom uploads — drives fit-to-canvas. */
+  aspect?: number;
   /** Normalized signed distance, positive inside, in centered aspect space. */
   sample: (px: number, py: number) => number;
 }
@@ -111,6 +113,7 @@ export function makeCustomShape(sdf: NormalizedSdf, id: string, label: string): 
     id,
     label,
     custom: true,
+    aspect,
     sample: (px, py) => {
       const sx = px / aspect + 0.5;
       const sy = py + 0.5;

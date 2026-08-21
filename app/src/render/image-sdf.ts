@@ -3,14 +3,17 @@
  * Browser glue around the pure `signedDistanceTransform`: decode → build a
  * binary inside-mask → distance transform → normalize by height.
  *
- * Mask heuristic: if the image has transparency, inside = opaque (alpha ≥ 128);
- * otherwise inside = dark (luminance < 128), i.e. a black silhouette on white.
+ * Coverage heuristic: if the image has transparency, inside = alpha; otherwise
+ * inside = darkness (black silhouette on white). Anti-aliased edge pixels are
+ * kept FRACTIONAL and fed to the sub-pixel distance transform — binarizing
+ * them was the source of staircase artifacts in gradient-based shading. A
+ * steep ramp around 0.5 keeps flat non-edge tones from reading as "near edge".
  *
  * SVG files bypass `createImageBitmap` (Chrome rejects SVG blobs) and load via
  * an `<img>` + object URL instead. Being vectors, they rasterize AT `maxDim`
  * rather than capped by it, so a small icon still yields a crisp SDF.
  */
-import { signedDistanceTransform } from './edt';
+import { signedDistanceTransformAA } from './edt';
 import type { NormalizedSdf } from './sdf-shapes';
 
 interface DecodedImage {
@@ -47,7 +50,7 @@ async function decodeImageFile(file: File, maxDim: number): Promise<DecodedImage
   }
 }
 
-export async function imageToSdf(file: File, maxDim = 512): Promise<NormalizedSdf> {
+export async function imageToSdf(file: File, maxDim = 1024): Promise<NormalizedSdf> {
   const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
   const decoded = await decodeImageFile(file, maxDim);
   const scale = isSvg
@@ -73,17 +76,21 @@ export async function imageToSdf(file: File, maxDim = 512): Promise<NormalizedSd
     }
   }
 
-  const mask = new Uint8Array(w * h);
-  for (let p = 0, i = 0; p < mask.length; p++, i += 4) {
+  const coverage = new Float32Array(w * h);
+  for (let p = 0, i = 0; p < coverage.length; p++, i += 4) {
+    let v: number;
     if (hasAlpha) {
-      mask[p] = data[i + 3] >= 128 ? 1 : 0;
+      v = data[i + 3] / 255;
     } else {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      mask[p] = lum < 128 ? 1 : 0;
+      v = 1 - lum / 255;
     }
+    // Steep ramp: preserves the fractional anti-aliased edge (which crosses
+    // 0.5 within a pixel) while flattening interior tones to solid 0/1.
+    coverage[p] = Math.min(1, Math.max(0, (v - 0.35) / 0.3));
   }
 
-  const sdfPx = signedDistanceTransform(mask, w, h);
+  const sdfPx = signedDistanceTransformAA(coverage, w, h);
   const out = new Float32Array(w * h);
   for (let i = 0; i < out.length; i++) out[i] = sdfPx[i] / h; // normalize by height
 

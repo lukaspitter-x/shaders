@@ -4,8 +4,8 @@ import type { LintFinding } from '@/glsl/lint-pencil';
 import { createShaderRenderer, type ShaderRenderer } from './webgl-quad';
 import { generateSdf, type ShapeDef } from './sdf-shapes';
 
-/** Cap the SDF texture's long side — the field is smooth, so this is plenty. */
-const SDF_MAX = 512;
+/** Cap the SDF texture's long side (matches the upload raster in image-sdf). */
+const SDF_MAX = 1024;
 
 /**
  * The shader preview. Owns the canvas, the animation clock, and the render
@@ -21,6 +21,7 @@ export function ShaderViewport({
   values,
   running,
   shape,
+  shapeScale = 1,
   lint,
   previewScale = 'full',
 }: {
@@ -30,6 +31,8 @@ export function ShaderViewport({
   running: boolean;
   /** Host shape: feeds `u_shape` and clips the fill. `null` = full background. */
   shape: ShapeDef | null;
+  /** User size multiplier for custom shapes (1 = fit to canvas). */
+  shapeScale?: number;
   lint: LintFinding[];
   /** Grid preview scale: 'full' = native resolution, 1–4 = one cell = N pixels. */
   previewScale?: 'full' | 1 | 2 | 3 | 4;
@@ -40,6 +43,7 @@ export function ShaderViewport({
   const rendererRef = useRef<ShaderRenderer | null>(null);
   const valuesRef = useRef(values);
   const shapeRef = useRef(shape);
+  const shapeScaleRef = useRef(shapeScale);
   const sizeRef = useRef({ w: 1, h: 1 });
   const timeRef = useRef(0);
   const mouseRef = useRef<[number, number]>([0, 0]);
@@ -49,6 +53,7 @@ export function ShaderViewport({
   // Keep the loop's view of settings/shape current without re-running effects.
   valuesRef.current = values;
   shapeRef.current = shape;
+  shapeScaleRef.current = shapeScale;
   previewScaleRef.current = previewScale;
 
   /** Compute the backing resolution. In scale mode, render square at full res. */
@@ -97,13 +102,22 @@ export function ShaderViewport({
   const regenerateSdf = () => {
     const r = rendererRef.current;
     if (!r) return;
-    const def = shapeRef.current;
+    let def = shapeRef.current;
     if (!def) {
       r.setSdf(null, 0, 0);
       return;
     }
     const { w, h } = sizeRef.current;
     if (w < 1 || h < 1) return;
+    // Custom uploads: fit the image into the canvas (with a small margin),
+    // scaled by the user's size dial. SDFs scale exactly: s·d(p/s).
+    if (def.custom) {
+      const canvasAspect = w / h;
+      const fit =
+        Math.min(1, canvasAspect / (def.aspect ?? 1)) * 0.92 * (shapeScaleRef.current || 1);
+      const base = def;
+      def = { ...base, sample: (px, py) => base.sample(px / fit, py / fit) * fit };
+    }
     const scale = Math.max(w, h) > SDF_MAX ? SDF_MAX / Math.max(w, h) : 1;
     const texW = Math.max(1, Math.round(w * scale));
     const texH = Math.max(1, Math.round(h * scale));
@@ -167,12 +181,12 @@ export function ShaderViewport({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragSource]);
 
-  // Rebuild the SDF when the host shape changes.
+  // Rebuild the SDF when the host shape or its size dial changes.
   useEffect(() => {
     regenerateSdf();
     drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape]);
+  }, [shape, shapeScale]);
 
   // Load user images into GL textures when their blob URLs change.
   const loadedImagesRef = useRef<Record<string, string>>({});
