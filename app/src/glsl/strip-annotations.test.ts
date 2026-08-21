@@ -1,6 +1,110 @@
 import { describe, it, expect } from 'vitest';
-import { downgradePencilDirectives, stripHiddenAnnotations } from './strip-annotations';
+import { bakeDefaults, downgradePencilDirectives, stripHiddenAnnotations } from './strip-annotations';
 import { lintPencil } from './lint-pencil';
+
+describe('bakeDefaults', () => {
+  it('rewrites a float @default with the current value', () => {
+    const src = [
+      '/** @label Speed @default 0.4 @range 0, 2 */',
+      'uniform float u_speed;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_speed: 1.25 });
+    expect(result).toContain('@default 1.25 ');
+    expect(result).not.toContain('@default 0.4');
+    expect(result).toContain('@range 0, 2');
+    expect(result).toContain('uniform float u_speed;');
+  });
+
+  it('rewrites a color @default with the current hex', () => {
+    const src = [
+      '/** @label Tint @color @default #4466ff */',
+      'uniform vec3 u_tint;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_tint: '#ff8800' });
+    expect(result).toContain('@default #ff8800');
+    expect(result).not.toContain('#4466ff');
+  });
+
+  it('rewrites a multi-line doc block without breaking its layout', () => {
+    const src = [
+      '/**',
+      ' * How deep the bevel goes.',
+      ' * @label Depth',
+      ' * @default 14',
+      ' * @range 1, 80',
+      ' */',
+      'uniform float u_depth;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_depth: 32 });
+    expect(result).toContain(' * @default 32.0');
+    expect(result).toContain(' * @range 1, 80');
+    expect(result).toContain('uniform float u_depth;');
+  });
+
+  it('inserts @default when the doc block has none', () => {
+    const src = [
+      '/** @label Speed @range 0, 2 */',
+      'uniform float u_speed;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_speed: 0.5 });
+    expect(result).toContain('@default 0.5');
+  });
+
+  it('leaves system uniforms untouched', () => {
+    const src = ['/** @resolution */', 'uniform vec2 u_resolution;'].join('\n');
+    expect(bakeDefaults(src, { u_resolution: 3 })).toBe(src);
+  });
+
+  it('leaves uniforms without a current value untouched', () => {
+    const src = [
+      '/** @label Speed @default 0.4 @range 0, 2 */',
+      'uniform float u_speed;',
+    ].join('\n');
+    expect(bakeDefaults(src, {})).toBe(src);
+  });
+
+  it('skips image samplers (blob URL values are not bakeable)', () => {
+    const src = ['/** @label Env Image */', 'uniform sampler2D u_env;'].join('\n');
+    expect(bakeDefaults(src, { u_env: 'blob:http://x/123' })).toBe(src);
+  });
+
+  it('bakes switch booleans as true/false', () => {
+    const src = [
+      '/** @label Invert @switch @default false */',
+      'uniform float u_invert;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_invert: true });
+    expect(result).toContain('@default true');
+  });
+
+  it('bakes select string values as numbers', () => {
+    const src = [
+      '/** @label Mode @select A, B, C @default 0 */',
+      'uniform float u_mode;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_mode: '2' });
+    expect(result).toContain('@default 2.0');
+  });
+
+  it('bakes bezier arrays as a comma list', () => {
+    const src = [
+      '/** @label Ease @bezier @default 0.25, 0.1, 0.25, 1.0 */',
+      'uniform vec4 u_ease;',
+    ].join('\n');
+    const result = bakeDefaults(src, { u_ease: [0.5, 0, 1, 1] });
+    expect(result).toContain('@default 0.5, 0.0, 1.0, 1.0');
+  });
+
+  it('baked output then export path still lints clean', () => {
+    const src = [
+      '/** @label Speed @default 0.4 @range 0, 2 */',
+      'uniform float u_speed;',
+      'void main() { gl_FragColor = vec4(u_speed); }',
+    ].join('\n');
+    const exported = downgradePencilDirectives(bakeDefaults(src, { u_speed: 1.5 }));
+    expect(lintPencil(exported)).toEqual([]);
+  });
+});
 
 describe('stripHiddenAnnotations', () => {
   it('preserves system uniforms regardless of visibleKeys', () => {

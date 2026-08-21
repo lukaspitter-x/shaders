@@ -1,0 +1,348 @@
+/**
+ * Chrome — beveled metal / liquid-chrome relief for any host shape.
+ *
+ * Treats the host layer's SDF as a height field: the signed distance drives a
+ * bevel/dome profile, the profile's finite-difference gradient gives a surface
+ * normal, and the normal indexes a procedural "studio" environment (horizon
+ * band + softbox stripes) with an optional image environment blended on top.
+ * Straight-on view; presets cover brushed metal, polished chrome, animated
+ * liquid chrome, and thin rim chrome.
+ */
+
+/** @resolution */
+uniform vec2 u_resolution;
+
+/** @time */
+uniform float u_time;
+
+/** @sdf */
+uniform sampler2D u_shape;
+
+// SECTION: Shape
+/**
+ * Height of the fake extrusion, in canvas pixels.
+ * @label Depth
+ * @default 22
+ * @range 1, 80
+ */
+uniform float u_depth;
+
+/**
+ * Width of the bevel ramp from the outline to the flat top, in canvas pixels.
+ * Larger than the shape's half-width turns the whole surface into a dome.
+ * @label Bevel Width
+ * @default 90
+ * @range 2, 200
+ */
+uniform float u_bevel;
+
+/**
+ * Bevel cross-section: 0 = straight chamfer, 1 = round (quarter-circle) dome.
+ * @label Profile
+ * @default 1
+ * @range 0, 1
+ */
+uniform float u_profile;
+
+/**
+ * Radius of the normal-smoothing filter, in canvas pixels. Higher softens
+ * faceting from the SDF texture at the cost of finer surface detail.
+ * @label Normal Smooth
+ * @default 3
+ * @range 1, 8
+ */
+uniform float u_smoothing;
+
+// SECTION: Material
+/**
+ * Metal tint multiplied over the reflected environment.
+ * @label Tint
+ * @color
+ * @default #ffffff
+ */
+uniform vec3 u_tint;
+
+/**
+ * Micro-roughness: blurs the environment toward an even satin sheen.
+ * @label Roughness
+ * @default 0.05
+ * @range 0, 1
+ */
+uniform float u_rough;
+
+/**
+ * Contrast of the reflected environment around mid gray.
+ * @label Contrast
+ * @default 1.35
+ * @range 0.2, 2.5
+ */
+uniform float u_contrast;
+
+/**
+ * Extra brightness on grazing edges (fresnel rim).
+ * @label Edge Shine
+ * @default 1.1
+ * @range 0, 2
+ */
+uniform float u_fresnel;
+
+/**
+ * Brushed-metal streaks across flat areas.
+ * @label Brush Streaks
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_brush;
+
+/**
+ * Fineness of the brush streaks. Higher is finer.
+ * @label Brush Fineness
+ * @default 4
+ * @range 1, 10
+ */
+uniform float u_brushScale;
+
+// SECTION: Environment
+/**
+ * Screen direction the environment's "up" (and key light) comes from, degrees.
+ * @label Light Angle
+ * @default 90
+ * @range 0, 360
+ */
+uniform float u_lightAngle;
+
+/**
+ * Sharpness of the sky/ground horizon line — the classic chrome divide.
+ * @label Horizon
+ * @default 0.75
+ * @range 0, 1
+ */
+uniform float u_horizon;
+
+/**
+ * Number of softbox stripes around the environment.
+ * @label Stripes
+ * @default 2
+ * @range 0, 16
+ */
+uniform float u_stripeFreq;
+
+/**
+ * Brightness of the softbox stripes.
+ * @label Stripe Strength
+ * @default 0.45
+ * @range 0, 1
+ */
+uniform float u_stripeAmt;
+
+/**
+ * Spin of the environment around the vertical axis, degrees.
+ * @label Env Rotation
+ * @default 0
+ * @range 0, 360
+ */
+uniform float u_envRotation;
+
+/**
+ * Shifts what flat surfaces reflect: negative shows the dark ground (gunmetal
+ * plates), positive the bright sky. 0 leaves flat tops exactly on the horizon.
+ * @label View Tilt
+ * @default 0.2
+ * @range -1, 1
+ */
+uniform float u_tilt;
+
+/**
+ * Virtual-camera perspective. 0 is a flat orthographic mirror; higher sweeps
+ * the environment across flat faces (the diagonal streaks of chrome plates).
+ * @label Perspective
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_persp;
+
+// SECTION: Image Environment
+/**
+ * Optional environment image reflected by the surface (sphere-mapped).
+ * @label Env Image
+ */
+uniform sampler2D u_env;
+
+/**
+ * Blend between the procedural studio and the environment image.
+ * @label Env Image Mix
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_envMix;
+
+/**
+ * Zoom of the environment image reflection.
+ * @label Env Zoom
+ * @default 1
+ * @range 0.3, 3
+ */
+uniform float u_envZoom;
+
+// SECTION: Motion
+/**
+ * Continuous environment rotation, degrees per second. 0 is static.
+ * @label Auto Sweep
+ * @default 0
+ * @range -90, 90
+ */
+uniform float u_sweep;
+
+/**
+ * Animated liquid swell of the surface. 0 keeps the metal rigid.
+ * @label Liquid Wobble
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_wobble;
+
+/**
+ * Spatial scale of the liquid swell. Higher is choppier.
+ * @label Wobble Scale
+ * @default 2.5
+ * @range 0.5, 8
+ */
+uniform float u_wobbleScale;
+
+/**
+ * Speed of the liquid swell.
+ * @label Wobble Speed
+ * @default 0.8
+ * @range 0, 3
+ */
+uniform float u_wobbleSpeed;
+
+float hash21(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i);
+  float b = hash21(i + vec2(1.0, 0.0));
+  float c = hash21(i + vec2(0.0, 1.0));
+  float d = hash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float wobbleField(vec2 p) {
+  float t = u_time * u_wobbleSpeed;
+  vec2 q = p * u_wobbleScale;
+  float w = sin(q.x * 3.1 + t * 1.7 + sin(q.y * 2.3 - t * 1.3));
+  w += sin(q.y * 2.7 - t + sin(q.x * 1.9 + t * 0.8));
+  return w * 0.25;
+}
+
+/** Height in canvas pixels at a canvas uv (0 outside the shape). */
+float heightAt(vec2 uv) {
+  float d = texture2D(u_shape, uv).r;
+  float t = clamp(d / max(u_bevel, 1.0), 0.0, 1.0);
+  float dome = sqrt(max(1.0 - (1.0 - t) * (1.0 - t), 0.0));
+  float h01 = mix(t, dome, u_profile);
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
+  h01 += wobbleField(p) * u_wobble * 0.35 * t;
+  return h01 * u_depth;
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  float d = texture2D(u_shape, uv).r;
+  if (d <= 0.0) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+
+  // Surface normal from a Sobel over the height field — the diagonal taps
+  // smooth the bilinear staircase of the SDF texture's gradient.
+  vec2 px = 1.0 / u_resolution;
+  float e = max(u_smoothing, 0.5);
+  float hE = heightAt(uv + vec2(e, 0.0) * px);
+  float hW = heightAt(uv - vec2(e, 0.0) * px);
+  float hN = heightAt(uv + vec2(0.0, e) * px);
+  float hS = heightAt(uv - vec2(0.0, e) * px);
+  float hNE = heightAt(uv + vec2(e, e) * px);
+  float hNW = heightAt(uv + vec2(-e, e) * px);
+  float hSE = heightAt(uv + vec2(e, -e) * px);
+  float hSW = heightAt(uv + vec2(-e, -e) * px);
+  float gx = (hNE + 2.0 * hE + hSE) - (hNW + 2.0 * hW + hSW);
+  float gy = (hNE + 2.0 * hN + hNW) - (hSE + 2.0 * hS + hSW);
+  vec3 n = normalize(vec3(-gx / (8.0 * e), -gy / (8.0 * e), 1.0));
+
+  // View ray from a virtual camera above the canvas center; u_persp = 0
+  // degenerates to the straight-on orthographic view.
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 vxy = (uv - 0.5) * vec2(aspect, 1.0) * u_persp;
+  vec3 v = normalize(vec3(-vxy, 1.0));
+  vec3 r = 2.0 * dot(n, v) * n - v;
+
+  // Rotate screen space so the environment's "up" follows the light angle.
+  float envUp = radians(u_lightAngle - 90.0);
+  float cu = cos(envUp);
+  float su = sin(envUp);
+  vec2 rr = vec2(cu * r.x + su * r.y, -su * r.x + cu * r.y);
+
+  float rot = radians(u_envRotation) + u_time * radians(u_sweep);
+  float azim = atan(rr.x, r.z + 1e-4) + rot;
+  float elev = rr.y + u_tilt;
+
+  // Procedural studio: bright band above a horizon, dark falloff below.
+  float rough = clamp(u_rough, 0.0, 1.0);
+  float soft = mix(0.5, 0.035, u_horizon);
+  soft = max(soft, rough * 0.45);
+  float horizon = smoothstep(-soft, soft, elev);
+  float sky = mix(0.85, 0.5, clamp(elev, 0.0, 1.0));
+  float ground = mix(0.04, 0.28, clamp(-elev, 0.0, 1.0));
+  float envL = mix(ground, sky, horizon);
+
+  // Softbox stripes around the azimuth — bipolar, so bright bars sit between
+  // darker gaps and the sky keeps structure instead of washing to white.
+  float bars = 0.5 + 0.5 * cos(azim * u_stripeFreq);
+  bars = pow(bars, mix(6.0, 1.2, rough));
+  envL += u_stripeAmt * (bars - 0.35) * horizon * 0.9;
+
+  envL = mix(envL, 0.42, rough * 0.6);
+
+  // Steep slopes reflect back toward the viewer — a dark room, not the sky.
+  float back = clamp(-r.z, 0.0, 1.0);
+  envL = mix(envL, 0.15, back * back * 0.85);
+
+  // Brushed streaks on near-flat areas, drawn across the light direction.
+  float topMask = smoothstep(0.85, 0.98, n.z);
+  float la = radians(u_lightAngle);
+  vec2 dir = vec2(cos(la), sin(la));
+  vec2 perp = vec2(-dir.y, dir.x);
+  vec2 sp = gl_FragCoord.xy;
+  float streak = vnoise(vec2(dot(sp, perp) * u_brushScale * 0.01, dot(sp, dir) * 0.002));
+  envL *= 1.0 + u_brush * topMask * (streak - 0.5) * 0.8;
+
+  envL = clamp(0.45 + (envL - 0.45) * u_contrast, 0.0, 1.6);
+
+  vec3 envC = vec3(envL);
+  if (u_envMix > 0.001) {
+    // Sphere-map the reflection vector into the env image, rotated + zoomed.
+    vec2 rxy = rr / max(u_envZoom, 0.05);
+    float m = 2.0 * sqrt(rxy.x * rxy.x + rxy.y * rxy.y + (r.z + 1.0) * (r.z + 1.0));
+    vec2 suv = rxy / max(m, 1e-4) + 0.5;
+    suv.x = fract(suv.x + rot * 0.15915494);
+    suv.y = 1.0 - suv.y;
+    vec3 img = texture2D(u_env, suv).rgb;
+    envC = mix(envC, img * (0.4 + 0.8 * envL), u_envMix);
+  }
+
+  float rim = pow(1.0 - clamp(n.z, 0.0, 1.0), 5.0) * u_fresnel * 0.7;
+  vec3 col = u_tint * envC + u_tint * rim * (0.35 + 0.65 * horizon);
+  // Soft shoulder above 0.75 so highlights roll into white instead of clipping.
+  vec3 hi = max(col - 0.75, 0.0);
+  col = clamp(min(col, vec3(0.75)) + hi / (1.0 + 2.0 * hi), 0.0, 1.0);
+
+  float alpha = smoothstep(0.0, 1.5, d);
+  gl_FragColor = vec4(col, alpha);
+}

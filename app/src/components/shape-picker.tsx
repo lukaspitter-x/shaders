@@ -98,7 +98,7 @@ export function ShapePicker({
             <span className="text-[10px]">Upload</span>
           </button>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+        <input ref={fileRef} type="file" accept="image/*,.svg" className="hidden" onChange={onFile} />
       </PopoverContent>
     </Popover>
   );

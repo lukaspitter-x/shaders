@@ -30,6 +30,51 @@ export function stripHiddenAnnotations(
 }
 
 /**
+ * Bake the workbench's CURRENT values into `@default` lines so a tuned look
+ * (e.g. a material preset) pastes into Pencil intact. Runs BEFORE
+ * `stripHiddenAnnotations` on the export path: visible uniforms keep their
+ * doc block, so this is the only way their tuned values survive the paste.
+ *
+ * System uniforms, uniforms with no current value, and image samplers (their
+ * value is a blob URL) are left untouched. Booleans stay `true`/`false` here —
+ * the downgrade pass numifies them for Pencil.
+ */
+export function bakeDefaults(source: string, currentValues: ShaderValues): string {
+  const SYSTEM_RE = /@(resolution|time|mouse|sdf)\b/;
+  const RE = /(\/\*\*[\s\S]*?\*\/)(\s*uniform\s+(\w+)\s+(\w+)\s*;)/g;
+
+  return source.replace(RE, (full, docBlock: string, decl: string, glslType: string, name: string) => {
+    if (SYSTEM_RE.test(docBlock)) return full;
+    if (glslType === 'sampler2D' && !/@envelope\b/.test(docBlock)) return full;
+    const formatted = formatBakedDefault(currentValues[name]);
+    if (formatted === null) return full;
+
+    let baked: string;
+    if (/@default\b/.test(docBlock)) {
+      baked = docBlock.replace(/@default\s+[^@*\n]*/, `@default ${formatted} `);
+    } else if (docBlock.includes('\n')) {
+      baked = docBlock.replace(/\n?\s*\*\/\s*$/, `\n * @default ${formatted}\n */`);
+    } else {
+      baked = docBlock.replace(/\s*\*\/\s*$/, ` @default ${formatted} */`);
+    }
+    return baked + decl;
+  });
+}
+
+function formatBakedDefault(value: ShaderValues[string] | undefined): string | null {
+  if (value === undefined) return null;
+  if (typeof value === 'number') return formatFloat(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (Array.isArray(value)) return value.map((v) => formatFloat(v)).join(', ');
+  if (typeof value === 'string') {
+    if (value.startsWith('#')) return value;
+    if (value !== '' && Number.isFinite(Number(value))) return formatFloat(Number(value));
+    return null;
+  }
+  return null;
+}
+
+/**
  * Rewrite workbench-only directives into Pencil's confirmed vocabulary so the
  * exported file pastes clean (Pencil hard-rejects any unknown `@directive`):
  *

@@ -277,6 +277,29 @@ undo history is in-memory only.
   `float` uniforms** (`u_ballX/Y/Z`), not one `vec3`. Same applies to any
   non-color vector until a dedicated vector control is added to
   `parse-annotations.ts` + the settings layer.
+- **Chrome (`chrome.glsl`): SDF-as-height-field is enough for beveled metal.**
+  The `@sdf` distance drives a bevel/dome profile (`clamp(d / bevel)` through a
+  chamfer↔quarter-circle mix), an 8-tap Sobel over that height gives the normal,
+  and the normal indexes a procedural studio env (horizon + bipolar softbox
+  stripes + dark "room behind camera" for back-reflections). Three findings from
+  tuning against real chrome refs: (1) a dead-on flat mirror reflects exactly
+  the horizon → featureless gray; fix with a **View Tilt** elev offset and a
+  **Perspective** term (view ray varies across the canvas) that produces the
+  diagonal sweeps chrome plates have; (2) fresnel with exponent 2 saturates the
+  whole bevel — use `pow(…, 5.0)` so only true silhouette grazing lights up;
+  (3) hard `clamp` clips highlight gradation — soft-shoulder above 0.75 instead.
+  Liquid-metal animation = time-varying sin-field added to the height inside
+  `heightAt` (so the Sobel sees it consistently), faded by the bevel ramp so the
+  outline stays put.
+- **Export bakes current values into `@default`** (`bakeDefaults`, runs before
+  `stripHiddenAnnotations` in both Download and the new Copy-for-Pencil button):
+  visible uniforms keep doc blocks on export, so baking is the only way a tuned
+  workbench preset survives the paste into Pencil.
+- **SVG uploads rasterize via `<img>` + object URL** — Chrome's
+  `createImageBitmap` rejects SVG blobs. Vector inputs rasterize AT `maxDim`
+  (now 512, matching the viewport's `SDF_MAX`) instead of being capped by
+  intrinsic size; a 256 grid under a 512 texture was the source of visible
+  stair-stepping in gradient-based normals.
 - **Fake a 3D normal from a 2D circle for cheap "lit sphere" looks.** `thermal`
   gets Fresnel/diffuse/corona on a sphere without raymarching: for a pixel at
   normalized radius `r` inside the projected circle, `z = sqrt(1 - r*r)` and

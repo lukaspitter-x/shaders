@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download, Pause, Play } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, ClipboardCopy, Download, Pause, Play } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import {
   Select,
@@ -21,7 +21,11 @@ import { ShaderViewport } from '@/render/shader-viewport';
 import { BUILTIN_SHAPES, makeCustomShape, type ShapeDef } from '@/render/sdf-shapes';
 import { imageToSdf } from '@/render/image-sdf';
 import { readJson, writeJson, useLocalStorage } from '@/lib/local-storage';
-import { downgradePencilDirectives, stripHiddenAnnotations } from '@/glsl/strip-annotations';
+import {
+  bakeDefaults,
+  downgradePencilDirectives,
+  stripHiddenAnnotations,
+} from '@/glsl/strip-annotations';
 import { usePresets } from '@/presets/use-presets';
 import { PresetSwitcher } from '@/presets/preset-switcher';
 import { EXPERIMENTS } from '@/experiments/registry';
@@ -151,10 +155,35 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Export path: bake current values into @default so the tuned look (e.g. a
+  // material preset) pastes into Pencil intact, then inline hidden uniforms.
+  const exportGlsl = () =>
+    selected
+      ? stripHiddenAnnotations(
+          bakeDefaults(selected.source, presetStore.values),
+          presetStore.pencilKeys,
+          presetStore.values,
+        )
+      : '';
+
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  const copyGlsl = async () => {
+    if (!selected) return;
+    try {
+      await navigator.clipboard.writeText(exportGlsl());
+      setCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('[copy for pencil]', err);
+    }
+  };
+
   const downloadGlsl = () => {
     if (!selected) return;
-    const glsl = stripHiddenAnnotations(selected.source, presetStore.pencilKeys, presetStore.values);
-    const blob = new Blob([glsl], { type: 'text/plain' });
+    const blob = new Blob([exportGlsl()], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -207,6 +236,17 @@ export default function App() {
                 requiresShape={requiresShape}
               />
             </>
+          )}
+          {selected && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Copy for Pencil"
+              title="Copy for Pencil (current values baked into @default)"
+              onClick={copyGlsl}
+            >
+              {copied ? <Check /> : <ClipboardCopy />}
+            </Button>
           )}
           {selected && (
             <Button

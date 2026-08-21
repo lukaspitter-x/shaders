@@ -11,6 +11,7 @@
  * The `.glsl` source is imported `?raw` and parsed for its schema at render
  * time (see `glsl/parse-annotations.ts`).
  */
+import chromeSource from './chrome.glsl?raw';
 import flipPlasmaSource from './flip-plasma.glsl?raw';
 import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
@@ -31,6 +32,7 @@ export interface ShaderExperiment {
 }
 
 export const EXPERIMENTS: ShaderExperiment[] = [
+  { id: 'chrome', label: 'Chrome', type: 'fill', source: chromeSource },
   { id: 'flip-plasma', label: 'Flip Plasma', type: 'fill', source: flipPlasmaSource },
   { id: 'gradient', label: 'Gradient', type: 'fill', source: gradientSource },
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
