@@ -14,7 +14,7 @@ import { UndoRedoButtons } from '@/components/undo-redo-buttons';
 import { ShapePicker } from '@/components/shape-picker';
 import { LintBadge } from '@/components/lint-badge';
 import { FpsPanel } from '@/perf/fps-panel';
-import { SettingsColumn } from '@/settings/settings-column';
+import { CollapsibleSection, SettingsColumn } from '@/settings/settings-column';
 import { parseShader, type ShaderValues } from '@/glsl/parse-annotations';
 import { lintPencil } from '@/glsl/lint-pencil';
 import { ShaderViewport } from '@/render/shader-viewport';
@@ -248,6 +248,34 @@ export default function App() {
   const [sdfBands, setSdfBands] = useLocalStorage('sdfBands', 24);
   const sdfViewValues = useMemo<ShaderValues>(() => ({ u_bands: sdfBands }), [sdfBands]);
 
+  const [shapeFieldOpen, setShapeFieldOpen] = useLocalStorage('shapeFieldOpen', true);
+
+  // Workbench-only controls injected into the settings column: the viewport
+  // backdrop joins the Environment group (own group on shaders without one).
+  const settingsExtras = useMemo(
+    () => [
+      {
+        section: 'Environment',
+        node: (
+          <div key="viewport-backdrop" className="flex items-center gap-2">
+            <input
+              type="color"
+              value={viewportBg}
+              onChange={(e) => setViewportBg(e.target.value)}
+              onDoubleClick={() => setViewportBg('#0a0a0c')}
+              title="Double-click to reset"
+              aria-label="Viewport background color"
+              className="h-6 w-8 cursor-pointer rounded border border-border bg-transparent p-0"
+            />
+            <span className="text-[11px]">Background</span>
+            <span className="ml-auto text-[10px] text-muted-foreground">preview only</span>
+          </div>
+        ),
+      },
+    ],
+    [viewportBg, setViewportBg],
+  );
+
   const VIEW_MODES: { value: ViewMode; label: string; enabled: boolean; title: string }[] = [
     { value: 'fill', label: 'Fill', enabled: true, title: 'Render the shader' },
     { value: 'sdf', label: 'SDF', enabled: canSdfView, title: 'Inspect the host shape distance field' },
@@ -370,17 +398,6 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           {selected && (
-            <input
-              type="color"
-              value={viewportBg}
-              onChange={(e) => setViewportBg(e.target.value)}
-              onDoubleClick={() => setViewportBg('#0a0a0c')}
-              title="Viewport background — double-click to reset"
-              aria-label="Viewport background color"
-              className="h-6 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
-            />
-          )}
-          {selected && (
             <>
               <span className="heading">Shape</span>
               <ShapePicker
@@ -493,12 +510,16 @@ export default function App() {
               onChange={onChange}
               pencilKeys={presetStore.pencilKeys}
               onTogglePencil={presetStore.togglePencilKey}
+              extras={settingsExtras}
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />
                   {(viewMode === 'sdf' || selectedShape?.custom) && (
-                    <div className="flex flex-col gap-2">
-                      <span className="heading">Shape Field</span>
+                    <CollapsibleSection
+                      title="Shape Field"
+                      open={shapeFieldOpen}
+                      onToggle={() => setShapeFieldOpen((o) => !o)}
+                    >
                       <div className="flex gap-1">
                         {(['exact', 'raster'] as const).map((s) => (
                           <button
@@ -586,7 +607,7 @@ export default function App() {
                           <span className="w-9 text-right text-[11px] tabular-nums">{sdfBands}px</span>
                         </div>
                       )}
-                    </div>
+                    </CollapsibleSection>
                   )}
                   {hasGrid && (
                     <div className="flex flex-col gap-2">

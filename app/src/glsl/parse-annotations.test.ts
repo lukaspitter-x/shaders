@@ -87,8 +87,9 @@ uniform float u_d;`;
     expect(byKey('u_a').section).toBe('Look');
     expect(byKey('u_b').section).toBe('Look');
     expect(byKey('u_c').section).toBe('Motion');
-    // A uniform with no preceding marker stays ungrouped.
-    expect(byKey('u_d').section).toBeUndefined();
+    // A uniform after a marker inherits it — otherwise collapsing a section
+    // would hide only its first control.
+    expect(byKey('u_d').section).toBe('Motion');
   });
 });
 
@@ -134,5 +135,36 @@ uniform float u_type;
     it('passes valid option strings through untouched', () => {
       expect(sanitizeValues(schema, { u_type: '2' }).u_type).toBe('2');
     });
+  });
+});
+
+describe('section propagation', () => {
+  it('every uniform after a SECTION marker inherits it until the next marker', () => {
+    const src = [
+      '// SECTION: Shape',
+      '/** @label A @default 1 @range 0, 2 */',
+      'uniform float u_a;',
+      '/** @label B @default 1 @range 0, 2 */',
+      'uniform float u_b;',
+      '// SECTION: Motion',
+      '/** @label C @default 1 @range 0, 2 */',
+      'uniform float u_c;',
+      '/** @label D @default 1 @range 0, 2 */',
+      'uniform float u_d;',
+    ].join('\n');
+    const { schema } = parseShader(src);
+    expect(schema.map((c) => c.section)).toEqual(['Shape', 'Shape', 'Motion', 'Motion']);
+  });
+
+  it('uniforms before any marker stay unsectioned', () => {
+    const src = [
+      '/** @label A @default 1 @range 0, 2 */',
+      'uniform float u_a;',
+      '// SECTION: Shape',
+      '/** @label B @default 1 @range 0, 2 */',
+      'uniform float u_b;',
+    ].join('\n');
+    const { schema } = parseShader(src);
+    expect(schema.map((c) => c.section)).toEqual([undefined, 'Shape']);
   });
 });

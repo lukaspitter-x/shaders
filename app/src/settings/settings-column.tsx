@@ -33,7 +33,7 @@ function saveOpenMap(key: string | undefined, map: Record<string, boolean>): voi
 }
 
 /** A section header that toggles the visibility of its controls. */
-function CollapsibleSection({
+export function CollapsibleSection({
   title,
   open,
   onToggle,
@@ -82,6 +82,7 @@ export function SettingsColumn<S>({
   onClose,
   pencilKeys,
   onTogglePencil,
+  extras,
 }: {
   schema: SettingsSchema<S>;
   value: S;
@@ -100,6 +101,12 @@ export function SettingsColumn<S>({
   pencilKeys?: Set<string>;
   /** Toggle a uniform's Pencil visibility. When provided, each control shows a checkbox gutter. */
   onTogglePencil?: (key: string) => void;
+  /**
+   * Workbench-level controls appended into a named schema section (e.g. the
+   * viewport backdrop into "Environment"). Extras whose section doesn't
+   * exist in the schema render as their own collapsible group at the end.
+   */
+  extras?: { section: string; node: ReactNode }[];
 }) {
   // Persisted collapse state, keyed per `storageKey`. Default = open.
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => loadOpenMap(storageKey));
@@ -120,6 +127,11 @@ export function SettingsColumn<S>({
     if (last && last.section === control.section) last.controls.push(control);
     else groups.push({ section: control.section, controls: [control] });
   }
+
+  const sectionNames = new Set(groups.map((g) => g.section).filter(Boolean));
+  const extrasFor = (section: string | undefined) =>
+    section ? (extras ?? []).filter((e) => e.section === section).map((e) => e.node) : [];
+  const orphanExtras = (extras ?? []).filter((e) => !sectionNames.has(e.section));
 
   return (
     <aside
@@ -185,6 +197,7 @@ export function SettingsColumn<S>({
                     onToggle={() => toggleSection(group.section!)}
                   >
                     {controls}
+                    {extrasFor(group.section)}
                   </CollapsibleSection>
                 ) : (
                   <div className="flex flex-col gap-3">{controls}</div>
@@ -192,6 +205,18 @@ export function SettingsColumn<S>({
               </Fragment>
             );
           })}
+          {orphanExtras.map((e, i) => (
+            <Fragment key={`extra-${e.section}-${i}`}>
+              <Separator />
+              <CollapsibleSection
+                title={e.section}
+                open={isOpen(e.section)}
+                onToggle={() => toggleSection(e.section)}
+              >
+                {e.node}
+              </CollapsibleSection>
+            </Fragment>
+          ))}
         </div>
       </ScrollArea>
     </aside>

@@ -204,14 +204,6 @@ uniform float u_stripeFreq;
 uniform float u_stripeAmt;
 
 /**
- * Spin of the environment around the vertical axis, degrees.
- * @label Env Rotation
- * @default 0
- * @range 0, 360
- */
-uniform float u_envRotation;
-
-/**
  * Shifts what flat surfaces reflect: negative shows the dark ground (gunmetal
  * plates), positive the bright sky. 0 leaves flat tops exactly on the horizon.
  * @label View Tilt
@@ -255,9 +247,18 @@ uniform float u_envZoom;
 
 // SECTION: Motion
 /**
+ * Spin of the environment around the vertical axis, degrees. The static
+ * starting angle that Env Spin animates from.
+ * @label Env Rotation
+ * @default 0
+ * @range 0, 360
+ */
+uniform float u_envRotation;
+
+/**
  * Continuous environment rotation, degrees per second. Negative reverses
  * direction; 0 is static.
- * @label Spin
+ * @label Env Spin
  * @default 0
  * @range -90, 90
  */

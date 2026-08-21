@@ -148,9 +148,16 @@ export function parseShader(source: string): ParsedShader {
 
   UNIFORM_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
+  let currentSection: string | undefined;
   while ((m = UNIFORM_RE.exec(source))) {
     const [, sectionMarker, body, glslType, name] = m;
     const { description, flags, values } = parseTags(body);
+
+    // A SECTION marker starts a group that every following uniform belongs
+    // to (until the next marker) — otherwise collapsing a section would hide
+    // only its first control.
+    const explicitSection = sectionMarker?.trim() || values.section;
+    if (explicitSection) currentSection = explicitSection;
 
     let role: UniformRole = 'user';
     if (flags.has('resolution')) role = 'resolution';
@@ -166,7 +173,6 @@ export function parseShader(source: string): ParsedShader {
 
     const label = values.label ?? name;
     const hint = description || undefined;
-    const section = sectionMarker?.trim() || values.section;
     const u: ParsedUniform = { name, glslType, role, label, hint };
 
     const isColor = flags.has('color') || (glslType === 'vec3' && !!values.default?.startsWith('#'));
@@ -217,9 +223,9 @@ export function parseShader(source: string): ParsedShader {
     }
     // (Unsupported user types fall through with no control — added as needed.)
 
-    if (section && schema.length > 0) {
+    if (currentSection && schema.length > 0) {
       const last = schema[schema.length - 1];
-      if (last.key === name) last.section = section;
+      if (last.key === name) last.section = currentSection;
     }
 
     if (u.default !== undefined) defaults[name] = u.default;
