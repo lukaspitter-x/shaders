@@ -257,7 +257,7 @@ uniform float u_envZoom;
 /**
  * Continuous environment rotation, degrees per second. Negative reverses
  * direction; 0 is static.
- * @label Env Spin
+ * @label Spin
  * @default 0
  * @range -90, 90
  */

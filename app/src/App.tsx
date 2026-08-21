@@ -226,6 +226,10 @@ export default function App() {
     void removeStoredShape(id).catch((err) => console.error('[shape delete]', err));
   };
 
+  // Viewport backdrop color — what shows through behind the (clipped) fill.
+  // Workbench-only: in Pencil the equivalent is a layer behind the shape.
+  const [viewportBg, setViewportBg] = useLocalStorage('viewportBg', '#0a0a0c');
+
   // Viewport view mode: the experiment itself, its host SDF, or the chrome
   // env panorama. Debug modes swap only the VIEWPORT shader — settings, lint,
   // and export always follow the experiment.
@@ -366,6 +370,17 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           {selected && (
+            <input
+              type="color"
+              value={viewportBg}
+              onChange={(e) => setViewportBg(e.target.value)}
+              onDoubleClick={() => setViewportBg('#0a0a0c')}
+              title="Viewport background — double-click to reset"
+              aria-label="Viewport background color"
+              className="h-6 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
+            />
+          )}
+          {selected && (
             <>
               <span className="heading">Shape</span>
               <ShapePicker
@@ -438,7 +453,10 @@ export default function App() {
       <div className="relative flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6">
           {selected && parsed && viewParsed && viewSource ? (
-            <div className="h-full w-full overflow-hidden rounded-lg border border-border">
+            <div
+              className="h-full w-full overflow-hidden rounded-lg border border-border"
+              style={{ background: viewportBg }}
+            >
               <ErrorBoundary key={`${selected.id}:${viewMode}`} label="Viewport crashed">
                 <ShaderViewport
                   parsed={viewParsed}
