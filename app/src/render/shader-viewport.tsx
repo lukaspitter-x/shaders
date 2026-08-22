@@ -141,6 +141,14 @@ export function ShaderViewport({
       const base = def;
       def = { ...base, sample: (px2, py2) => base.sample(px2 / fit, py2 / fit) * fit };
     }
+    if (!def.custom && shapeScaleRef.current !== 1) {
+      const userScale = Math.min(2, Math.max(0.25, shapeScaleRef.current || 1));
+      const base = def;
+      def = {
+        ...base,
+        sample: (px2, py2) => base.sample(px2 / userScale, py2 / userScale) * userScale,
+      };
+    }
     r.setSdf(generateSdf(def, texW, texH, w / h, h), texW, texH);
   };
 

@@ -14,7 +14,8 @@ import { UndoRedoButtons } from '@/components/undo-redo-buttons';
 import { ShapePicker } from '@/components/shape-picker';
 import { LintBadge } from '@/components/lint-badge';
 import { FpsPanel } from '@/perf/fps-panel';
-import { CollapsibleSection, SettingsColumn } from '@/settings/settings-column';
+import { SettingsColumn } from '@/settings/settings-column';
+import { SliderControl } from '@/settings/controls/slider-control';
 import { parseShader, type ShaderValues } from '@/glsl/parse-annotations';
 import { lintPencil } from '@/glsl/lint-pencil';
 import { ShaderViewport } from '@/render/shader-viewport';
@@ -37,11 +38,9 @@ import {
   type ViewMode,
 } from '@/render/view-modes';
 import {
-  readJson,
   readUiState,
   useLocalStorage,
   useTabState,
-  writeJson,
   writeUiState,
 } from '@/lib/local-storage';
 import {
@@ -53,7 +52,6 @@ import { usePresets } from '@/presets/use-presets';
 import { PresetSwitcher } from '@/presets/preset-switcher';
 import { EXPERIMENTS } from '@/experiments/registry';
 
-const shapeKey = (id: string) => `shape:${id}`;
 const SELECTED_KEY = 'selected';
 
 type PreviewScale = 'full' | 1 | 2 | 3 | 4;
@@ -84,13 +82,6 @@ export default function App() {
   const [fpsLogging, setFpsLogging] = useLocalStorage('fpsLogging', false);
 
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
-  const [shapeId, setShapeId] = useState('none');
-  const [shapeScales, setShapeScales] = useState<Record<string, number>>(() =>
-    readJson('shapeScales', {}),
-  );
-  useEffect(() => {
-    writeJson('shapeScales', shapeScales);
-  }, [shapeScales]);
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
 
   // Shape-field generation controls (persisted). Detail = raster/grid long
@@ -154,45 +145,35 @@ export default function App() {
   const [previewScale, setPreviewScale] = useLocalStorage<PreviewScale>('previewScale', 'full');
   const hasGrid = parsed?.schema.some((c) => c.key === 'u_gridSize') ?? false;
 
-  const selectedShape: ShapeDef | null =
-    shapeId !== 'none'
-      ? (shapes.find((s) => s.id === shapeId) ?? null)
-      : requiresShape
-        ? (shapes.find((s) => s.id === 'rounded-rect') ?? shapes[0] ?? null)
-        : null;
-
   // Presets hook — replaces the old useState<ShaderValues> + localStorage persistence.
+  const defaultPresetShape = useMemo(
+    () => ({ id: requiresShape ? 'rounded-rect' : 'none', size: 1 }),
+    [requiresShape],
+  );
   const presetStore = usePresets(
     selectedId ?? '',
     parsed?.defaults ?? {},
     parsed?.schema,
+    defaultPresetShape,
   );
 
-  // Restore shape on shader switch (and when async-restored uploads arrive,
-  // so a persisted custom selection can win over the interim fallback).
-  useEffect(() => {
-    if (!parsed || !selected) {
-      setShapeId('none');
-      return;
-    }
-    const storedShape = readUiState<string | null>(shapeKey(selected.id), null);
-    setShapeId(
-      isUsableShapeId(storedShape, shapes)
-        ? storedShape
-        : parsed.system.sdf
-          ? 'rounded-rect'
-          : 'none',
-    );
-  }, [parsed, selected, shapes]);
+  const savedShapeId = presetStore.shape.id;
+  const shapeId = isUsableShapeId(savedShapeId, shapes)
+    ? savedShapeId
+    : requiresShape
+      ? 'rounded-rect'
+      : 'none';
+  const selectedShape: ShapeDef | null =
+    shapeId === 'none' ? null : (shapes.find((s) => s.id === shapeId) ?? null);
+  const shapeScale = presetStore.shape.size;
 
   const selectShape = (id: string) => {
-    setShapeId(id);
-    if (selectedId) writeUiState(shapeKey(selectedId), id);
+    presetStore.setShape({ id, size: shapeScale });
   };
 
   useEffect(() => {
     if (requiresShape && shapeId === 'none') selectShape('rounded-rect');
-  }, [requiresShape, shapeId]);
+  }, [requiresShape, shapeId, selectShape]);
 
   const onUploadShape = async (file: File) => {
     try {
@@ -214,14 +195,8 @@ export default function App() {
     presetStore.setValue(key, value);
   };
 
-  const shapeScale = selectedShape?.custom ? (shapeScales[selectedShape.id] ?? 1) : 1;
-
   const onDeleteShape = (id: string) => {
     setCustomShapes((prev) => prev.filter((s) => s.id !== id));
-    setShapeScales((prev) => {
-      const { [id]: _removed, ...rest } = prev;
-      return rest;
-    });
     if (shapeId === id) selectShape(requiresShape ? 'rounded-rect' : 'none');
     void removeStoredShape(id).catch((err) => console.error('[shape delete]', err));
   };
@@ -248,12 +223,125 @@ export default function App() {
   const [sdfBands, setSdfBands] = useLocalStorage('sdfBands', 24);
   const sdfViewValues = useMemo<ShaderValues>(() => ({ u_bands: sdfBands }), [sdfBands]);
 
-  const [shapeFieldOpen, setShapeFieldOpen] = useLocalStorage('shapeFieldOpen', true);
-
   // Workbench-only controls injected into the settings column: the viewport
   // backdrop joins the Environment group (own group on shaders without one).
   const settingsExtras = useMemo(
     () => [
+      {
+        section: 'Shape',
+        position: 'before' as const,
+        node: (
+          <div key="host-shape" className="flex flex-col gap-3">
+            <ShapePicker
+              shapes={shapes}
+              value={shapeId}
+              onSelect={selectShape}
+              onUpload={onUploadShape}
+              onDelete={onDeleteShape}
+              requiresShape={requiresShape}
+            />
+            {selectedShape && (
+              <SliderControl
+                label="Size"
+                value={shapeScale}
+                min={0.25}
+                max={2}
+                step={0.05}
+                unit="×"
+                onChange={(size) => presetStore.setShape({ id: shapeId, size })}
+                onReset={() => presetStore.setShape({ id: shapeId, size: 1 })}
+              />
+            )}
+          </div>
+        ),
+      },
+      ...((viewMode === 'sdf' || selectedShape?.custom)
+        ? [
+            {
+              section: 'Shape Field',
+              position: 'before' as const,
+              afterSection: 'Shape',
+              node: (
+                <div key="shape-field" className="flex flex-col gap-3">
+                  <div className="flex gap-1">
+                    {(['exact', 'raster'] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        title={
+                          s === 'exact'
+                            ? 'Trace the SVG vector outlines directly (SVG only; others always rasterize)'
+                            : 'Rasterize + distance transform'
+                        }
+                        onClick={() => setSdfSource(s)}
+                        className={cn(
+                          'flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
+                          sdfSource === s
+                            ? 'bg-accent text-accent-foreground'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-1">
+                    {[512, 1024, 2048].map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setSdfDetail(r)}
+                        className={cn(
+                          'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                          sdfDetail === r
+                            ? 'bg-accent text-accent-foreground'
+                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                        )}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] leading-snug text-muted-foreground">
+                    Source + grid resolution for uploaded shapes. Changing either rebuilds every
+                    upload from its original file.
+                  </p>
+                  <SliderControl
+                    label="Expand"
+                    value={shapeExpand}
+                    min={-20}
+                    max={20}
+                    step={0.5}
+                    unit="px"
+                    onChange={setShapeExpand}
+                    onReset={() => setShapeExpand(0)}
+                  />
+                  <SliderControl
+                    label="Smooth"
+                    value={shapeSmooth}
+                    min={0}
+                    max={6}
+                    step={1}
+                    onChange={setShapeSmooth}
+                    onReset={() => setShapeSmooth(0)}
+                  />
+                  {viewMode === 'sdf' && (
+                    <SliderControl
+                      label="Bands"
+                      value={sdfBands}
+                      min={4}
+                      max={64}
+                      step={1}
+                      unit="px"
+                      onChange={setSdfBands}
+                      onReset={() => setSdfBands(24)}
+                    />
+                  )}
+                </div>
+              ),
+            },
+          ]
+        : []),
       {
         section: 'Environment',
         node: (
@@ -273,7 +361,30 @@ export default function App() {
         ),
       },
     ],
-    [viewportBg, setViewportBg],
+    [
+      onDeleteShape,
+      onUploadShape,
+      presetStore,
+      requiresShape,
+      sdfBands,
+      sdfDetail,
+      sdfSource,
+      selectShape,
+      selectedShape,
+      setSdfBands,
+      setSdfDetail,
+      setSdfSource,
+      setShapeExpand,
+      setShapeSmooth,
+      setViewportBg,
+      shapeExpand,
+      shapeId,
+      shapeScale,
+      shapeSmooth,
+      shapes,
+      viewMode,
+      viewportBg,
+    ],
   );
 
   const VIEW_MODES: { value: ViewMode; label: string; enabled: boolean; title: string }[] = [
@@ -398,40 +509,6 @@ export default function App() {
 
         <div className="ml-auto flex items-center gap-2">
           {selected && (
-            <>
-              <span className="heading">Shape</span>
-              <ShapePicker
-                shapes={shapes}
-                value={shapeId}
-                onSelect={selectShape}
-                onUpload={onUploadShape}
-                onDelete={onDeleteShape}
-                requiresShape={requiresShape}
-              />
-              {selectedShape?.custom && (
-                <input
-                  type="range"
-                  min={0.25}
-                  max={2}
-                  step={0.05}
-                  value={shapeScale}
-                  title={`Shape size ×${shapeScale.toFixed(2)} — double-click to reset`}
-                  aria-label="Shape size"
-                  className="w-24 accent-foreground"
-                  onChange={(e) =>
-                    setShapeScales((prev) => ({
-                      ...prev,
-                      [selectedShape.id]: Number(e.target.value),
-                    }))
-                  }
-                  onDoubleClick={() =>
-                    setShapeScales((prev) => ({ ...prev, [selectedShape.id]: 1 }))
-                  }
-                />
-              )}
-            </>
-          )}
-          {selected && (
             <Button
               variant="ghost"
               size="icon"
@@ -514,101 +591,6 @@ export default function App() {
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />
-                  {(viewMode === 'sdf' || selectedShape?.custom) && (
-                    <CollapsibleSection
-                      title="Shape Field"
-                      open={shapeFieldOpen}
-                      onToggle={() => setShapeFieldOpen((o) => !o)}
-                    >
-                      <div className="flex gap-1">
-                        {(['exact', 'raster'] as const).map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            title={
-                              s === 'exact'
-                                ? 'Trace the SVG vector outlines directly (SVG only; others always rasterize)'
-                                : 'Rasterize + distance transform'
-                            }
-                            onClick={() => setSdfSource(s)}
-                            className={cn(
-                              'flex-1 rounded-md px-2 py-1 text-xs font-medium capitalize transition-colors',
-                              sdfSource === s
-                                ? 'bg-accent text-accent-foreground'
-                                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                            )}
-                          >
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex gap-1">
-                        {[512, 1024, 2048].map((r) => (
-                          <button
-                            key={r}
-                            type="button"
-                            onClick={() => setSdfDetail(r)}
-                            className={cn(
-                              'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
-                              sdfDetail === r
-                                ? 'bg-accent text-accent-foreground'
-                                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                            )}
-                          >
-                            {r}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] leading-snug text-muted-foreground">
-                        Source + grid resolution for uploaded shapes. Changing either rebuilds
-                        every upload from its original file.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <span className="w-12 text-[11px] text-muted-foreground">Expand</span>
-                        <input
-                          type="range"
-                          min={-20}
-                          max={20}
-                          step={0.5}
-                          value={shapeExpand}
-                          onChange={(e) => setShapeExpand(Number(e.target.value))}
-                          onDoubleClick={() => setShapeExpand(0)}
-                          className="flex-1 accent-foreground"
-                        />
-                        <span className="w-9 text-right text-[11px] tabular-nums">
-                          {shapeExpand}px
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-12 text-[11px] text-muted-foreground">Smooth</span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={6}
-                          step={1}
-                          value={shapeSmooth}
-                          onChange={(e) => setShapeSmooth(Number(e.target.value))}
-                          className="flex-1 accent-foreground"
-                        />
-                        <span className="w-9 text-right text-[11px] tabular-nums">{shapeSmooth}</span>
-                      </div>
-                      {viewMode === 'sdf' && (
-                        <div className="flex items-center gap-2">
-                          <span className="w-12 text-[11px] text-muted-foreground">Bands</span>
-                          <input
-                            type="range"
-                            min={4}
-                            max={64}
-                            step={1}
-                            value={sdfBands}
-                            onChange={(e) => setSdfBands(Number(e.target.value))}
-                            className="flex-1 accent-foreground"
-                          />
-                          <span className="w-9 text-right text-[11px] tabular-nums">{sdfBands}px</span>
-                        </div>
-                      )}
-                    </CollapsibleSection>
-                  )}
                   {hasGrid && (
                     <div className="flex flex-col gap-2">
                       <span className="heading">Preview</span>

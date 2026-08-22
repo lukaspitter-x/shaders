@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { Preset, PresetStore, ShaderPresets } from './types';
+import type { Preset, PresetShape, PresetStore, ShaderPresets } from './types';
 import type { ShaderValues } from '@/glsl/parse-annotations';
 import { sanitizeValues } from '@/glsl/parse-annotations';
 import type { SettingsSchema } from '@/settings/schema';
@@ -89,13 +89,14 @@ function uid(): string {
   return a.toString(36) + b.toString(36);
 }
 
-function seedShader(shaderId: string, defaults: ShaderValues) {
+function seedShader(shaderId: string, defaults: ShaderValues, defaultShape: PresetShape) {
   if (current[shaderId]) return;
   const preset: Preset = {
     id: uid(),
     name: 'Default',
     createdAt: Date.now(),
     values: structuredClone(defaults),
+    shape: structuredClone(defaultShape),
   };
   const entry: ShaderPresets = {
     shaderId,
@@ -175,8 +176,10 @@ export interface UsePresets {
   presets: Preset[];
   active: Preset | null;
   values: ShaderValues;
+  shape: PresetShape;
   ready: boolean;
   setValue: (key: string, value: ShaderValues[string]) => void;
+  setShape: (shape: PresetShape) => void;
   createPreset: (name?: string) => void;
   duplicatePreset: (id?: string) => void;
   deletePreset: (id: string) => void;
@@ -198,6 +201,7 @@ export function usePresets(
   shaderId: string,
   defaults: ShaderValues,
   schema?: SettingsSchema<ShaderValues>,
+  defaultShape: PresetShape = { id: 'none', size: 1 },
 ): UsePresets {
   const snap = useSyncExternalStore(
     (l) => {
@@ -215,7 +219,7 @@ export function usePresets(
   }, []);
 
   useEffect(() => {
-    if (loaded && !current[shaderId]) seedShader(shaderId, defaults);
+    if (loaded && !current[shaderId]) seedShader(shaderId, defaults, defaultShape);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, shaderId]);
 
@@ -230,6 +234,17 @@ export function usePresets(
     if (!schema) return merged;
     return sanitizeValues(schema, merged);
   }, [active?.values, defaults, schema]);
+
+  const shape = useMemo<PresetShape>(() => {
+    const saved = active?.shape;
+    return {
+      id: typeof saved?.id === 'string' ? saved.id : defaultShape.id,
+      size:
+        typeof saved?.size === 'number' && Number.isFinite(saved.size)
+          ? Math.min(2, Math.max(0.25, saved.size))
+          : defaultShape.size,
+    };
+  }, [active?.shape, defaultShape.id, defaultShape.size]);
 
   const ready = !!entry;
 
@@ -291,6 +306,18 @@ export function usePresets(
     [shaderId],
   );
 
+  const setShape = useCallback(
+    (nextShape: PresetShape) => {
+      setEntry(shaderId, (e) => ({
+        ...e,
+        presets: e.presets.map((p) =>
+          p.id === e.activePresetId ? { ...p, shape: structuredClone(nextShape) } : p,
+        ),
+      }));
+    },
+    [shaderId],
+  );
+
   const createPreset = useCallback(
     (name?: string) => {
       const id = uid();
@@ -299,6 +326,7 @@ export function usePresets(
         name: name ?? `Preset ${presets.length + 1}`,
         createdAt: Date.now(),
         values: structuredClone(defaults),
+        shape: structuredClone(defaultShape),
       };
       setEntry(shaderId, (e) => ({
         ...e,
@@ -306,7 +334,7 @@ export function usePresets(
         presets: [...e.presets, preset],
       }));
     },
-    [shaderId, presets.length, defaults],
+    [shaderId, presets.length, defaults, defaultShape],
   );
 
   const duplicatePreset = useCallback(
@@ -320,6 +348,7 @@ export function usePresets(
         name: `${src.name} copy`,
         createdAt: Date.now(),
         values: structuredClone(src.values),
+        shape: structuredClone(src.shape ?? defaultShape),
       };
       setEntry(shaderId, (e) => ({
         ...e,
@@ -327,7 +356,7 @@ export function usePresets(
         presets: [...e.presets, copy],
       }));
     },
-    [shaderId, entry],
+    [shaderId, entry, defaultShape],
   );
 
   const deletePreset = useCallback(
@@ -366,8 +395,10 @@ export function usePresets(
     presets,
     active,
     values,
+    shape,
     ready,
     setValue,
+    setShape,
     createPreset,
     duplicatePreset,
     deletePreset,

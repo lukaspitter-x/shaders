@@ -103,10 +103,17 @@ export function SettingsColumn<S>({
   onTogglePencil?: (key: string) => void;
   /**
    * Workbench-level controls appended into a named schema section (e.g. the
-   * viewport backdrop into "Environment"). Extras whose section doesn't
-   * exist in the schema render as their own collapsible group at the end.
+   * viewport backdrop into "Environment"). A `before` extra is prepended to
+   * its matching section, or becomes a leading group if that section doesn't
+   * exist. An orphan with `afterSection` becomes its own group immediately
+   * after that schema section. Other orphan extras render at the end.
    */
-  extras?: { section: string; node: ReactNode }[];
+  extras?: {
+    section: string;
+    node: ReactNode;
+    position?: 'before' | 'after';
+    afterSection?: string;
+  }[];
 }) {
   // Persisted collapse state, keyed per `storageKey`. Default = open.
   const [openMap, setOpenMap] = useState<Record<string, boolean>>(() => loadOpenMap(storageKey));
@@ -129,9 +136,19 @@ export function SettingsColumn<S>({
   }
 
   const sectionNames = new Set(groups.map((g) => g.section).filter(Boolean));
-  const extrasFor = (section: string | undefined) =>
-    section ? (extras ?? []).filter((e) => e.section === section).map((e) => e.node) : [];
+  const extrasFor = (section: string | undefined, position: 'before' | 'after') =>
+    section
+      ? (extras ?? [])
+          .filter((e) => e.section === section && (e.position ?? 'after') === position)
+          .map((e) => e.node)
+      : [];
   const orphanExtras = (extras ?? []).filter((e) => !sectionNames.has(e.section));
+  const insertedExtras = orphanExtras.filter(
+    (e) => e.afterSection && sectionNames.has(e.afterSection),
+  );
+  const unplacedExtras = orphanExtras.filter((e) => !insertedExtras.includes(e));
+  const leadingExtras = unplacedExtras.filter((e) => e.position === 'before');
+  const trailingExtras = unplacedExtras.filter((e) => e.position !== 'before');
 
   return (
     <aside
@@ -163,6 +180,18 @@ export function SettingsColumn<S>({
       {header && <div className="shrink-0 border-b border-border p-3">{header}</div>}
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-5 p-4">
+          {leadingExtras.map((e, i) => (
+            <Fragment key={`leading-extra-${e.section}-${i}`}>
+              {i > 0 && <Separator />}
+              <CollapsibleSection
+                title={e.section}
+                open={isOpen(e.section)}
+                onToggle={() => toggleSection(e.section)}
+              >
+                {e.node}
+              </CollapsibleSection>
+            </Fragment>
+          ))}
           {groups.map((group, gi) => {
             const controls = group.controls.map((control) => {
               const node = (
@@ -187,25 +216,41 @@ export function SettingsColumn<S>({
                 <Fragment key={k}>{node}</Fragment>
               );
             });
+            const insertedAfter = insertedExtras.filter(
+              (e) => e.afterSection === group.section,
+            );
             return (
               <Fragment key={gi}>
-                {gi > 0 && <Separator />}
+                {(gi > 0 || leadingExtras.length > 0) && <Separator />}
                 {group.section ? (
                   <CollapsibleSection
                     title={group.section}
                     open={isOpen(group.section)}
                     onToggle={() => toggleSection(group.section!)}
                   >
+                    {extrasFor(group.section, 'before')}
                     {controls}
-                    {extrasFor(group.section)}
+                    {extrasFor(group.section, 'after')}
                   </CollapsibleSection>
                 ) : (
                   <div className="flex flex-col gap-3">{controls}</div>
                 )}
+                {insertedAfter.map((e, i) => (
+                  <Fragment key={`inserted-extra-${e.section}-${i}`}>
+                    <Separator />
+                    <CollapsibleSection
+                      title={e.section}
+                      open={isOpen(e.section)}
+                      onToggle={() => toggleSection(e.section)}
+                    >
+                      {e.node}
+                    </CollapsibleSection>
+                  </Fragment>
+                ))}
               </Fragment>
             );
           })}
-          {orphanExtras.map((e, i) => (
+          {trailingExtras.map((e, i) => (
             <Fragment key={`extra-${e.section}-${i}`}>
               <Separator />
               <CollapsibleSection
