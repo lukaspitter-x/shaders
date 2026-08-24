@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ClipboardCopy, Download, Pause, Play } from 'lucide-react';
+import {
+  Check,
+  ClipboardCopy,
+  Download,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Pause,
+  Play,
+} from 'lucide-react';
 import { cn } from '@/lib/cn';
 import {
   Select,
@@ -9,6 +18,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { UndoRedoButtons } from '@/components/undo-redo-buttons';
 import { ShapePicker } from '@/components/shape-picker';
@@ -80,6 +96,10 @@ export default function App() {
   const [running, setRunning] = useLocalStorage('running', true);
   const [fpsVisible, setFpsVisible] = useLocalStorage('fpsVisible', true);
   const [fpsLogging, setFpsLogging] = useLocalStorage('fpsLogging', false);
+  const [settingsOpen, setSettingsOpen] = useLocalStorage(
+    'settingsOpen',
+    window.matchMedia('(min-width: 768px)').matches,
+  );
 
   const [customShapes, setCustomShapes] = useState<ShapeDef[]>([]);
   const shapes = useMemo(() => [...BUILTIN_SHAPES, ...customShapes], [customShapes]);
@@ -455,93 +475,176 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const viewModeButtons = (className?: string) => (
+    <div className={cn('flex rounded-md border border-border p-0.5', className)}>
+      {VIEW_MODES.filter((m) => m.enabled).map((m) => (
+        <button
+          key={m.value}
+          type="button"
+          title={m.title}
+          onClick={() => setViewMode(m.value)}
+          className={cn(
+            'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
+            viewMode === m.value
+              ? 'bg-accent text-accent-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="flex h-[100dvh] flex-col bg-background text-foreground">
-      <header className="flex h-10 shrink-0 items-center gap-3 border-b border-border px-3 sm:px-4">
-        <span className="logo hidden sm:inline">shaders</span>
-        <div className="w-40 min-w-0 sm:w-48">
-          <Select value={selectedId} onValueChange={setSelectedId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Shader" />
-            </SelectTrigger>
-            <SelectContent>
-              {EXPERIMENTS.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <FpsPanel
-          visible={fpsVisible}
-          logging={fpsLogging}
-          onToggleVisible={() => setFpsVisible((v) => !v)}
-          onToggleLogging={() => setFpsLogging((v) => !v)}
-        />
-        <UndoRedoButtons
-          canUndo={presetStore.canUndo}
-          canRedo={presetStore.canRedo}
-          onUndo={presetStore.undo}
-          onRedo={presetStore.redo}
-        />
-        {selected && <LintBadge findings={lint} />}
-        {selected && (canSdfView || canEnvView) && (
-          <div className="flex rounded-md border border-border p-0.5">
-            {VIEW_MODES.filter((m) => m.enabled).map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                title={m.title}
-                onClick={() => setViewMode(m.value)}
-                className={cn(
-                  'rounded px-2 py-0.5 text-[11px] font-medium transition-colors',
-                  viewMode === m.value
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
+      <header className="shrink-0 border-b border-border">
+        <div className="flex h-11 items-center gap-2 px-2 md:h-10 md:gap-3 md:px-4">
+          <span className="logo hidden lg:inline">shaders</span>
+          <div className="min-w-0 flex-1 md:w-48 md:flex-none">
+            <Select value={selectedId} onValueChange={setSelectedId}>
+              <SelectTrigger aria-label="Select shader">
+                <SelectValue placeholder="Shader" />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPERIMENTS.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="hidden lg:block">
+            <FpsPanel
+              visible={fpsVisible}
+              logging={fpsLogging}
+              onToggleVisible={() => setFpsVisible((v) => !v)}
+              onToggleLogging={() => setFpsLogging((v) => !v)}
+            />
+          </div>
+          <div className="hidden md:block">
+            <UndoRedoButtons
+              canUndo={presetStore.canUndo}
+              canRedo={presetStore.canRedo}
+              onUndo={presetStore.undo}
+              onRedo={presetStore.redo}
+            />
+          </div>
+          <div className="hidden md:block">{selected && <LintBadge findings={lint} />}</div>
+          <div className="hidden md:block">
+            {selected && (canSdfView || canEnvView) && viewModeButtons()}
+          </div>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1 md:gap-2">
+            {selected && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={running ? 'Pause' : 'Play'}
+                title={running ? 'Pause (Space)' : 'Play (Space)'}
+                onClick={() => setRunning((r) => !r)}
+                className="md:hidden"
               >
-                {m.label}
-              </button>
-            ))}
+                {running ? <Pause /> : <Play />}
+              </Button>
+            )}
+            {parsed && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={settingsOpen ? 'Hide settings' : 'Show settings'}
+                aria-pressed={settingsOpen}
+                title={settingsOpen ? 'Hide settings' : 'Show settings'}
+                onClick={() => setSettingsOpen((open) => !open)}
+              >
+                {settingsOpen ? <PanelRightClose /> : <PanelRightOpen />}
+              </Button>
+            )}
+            {selected && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Copy for Pencil"
+                title="Copy for Pencil (current values baked into @default)"
+                onClick={copyGlsl}
+                className="hidden md:inline-flex"
+              >
+                {copied ? <Check /> : <ClipboardCopy />}
+              </Button>
+            )}
+            {selected && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Download .glsl"
+                title="Download .glsl"
+                onClick={downloadGlsl}
+                className="hidden md:inline-flex"
+              >
+                <Download />
+              </Button>
+            )}
+            {selected && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={running ? 'Pause' : 'Play'}
+                title={running ? 'Pause (Space)' : 'Play (Space)'}
+                onClick={() => setRunning((r) => !r)}
+                className="hidden md:inline-flex"
+              >
+                {running ? <Pause /> : <Play />}
+              </Button>
+            )}
+            {selected && (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="More actions"
+                    title="More actions"
+                    className="md:hidden"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => void copyGlsl()}>
+                    {copied ? <Check /> : <ClipboardCopy />}
+                    {copied ? 'Copied for Pencil' : 'Copy for Pencil'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={downloadGlsl}>
+                    <Download /> Download .glsl
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setFpsVisible((v) => !v)}>
+                    {fpsVisible ? 'Hide' : 'Show'} FPS on desktop
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setFpsLogging((v) => !v)}>
+                    {fpsLogging ? 'Stop' : 'Start'} performance logging
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </div>
+
+        {selected && (
+          <div className="flex h-9 items-center gap-1 border-t border-border px-2 md:hidden">
+            <UndoRedoButtons
+              canUndo={presetStore.canUndo}
+              canRedo={presetStore.canRedo}
+              onUndo={presetStore.undo}
+              onRedo={presetStore.redo}
+            />
+            <div className="min-w-0 flex-1">
+              {(canSdfView || canEnvView) && viewModeButtons('w-fit')}
+            </div>
+            <LintBadge findings={lint} />
           </div>
         )}
-
-        <div className="ml-auto flex items-center gap-2">
-          {selected && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Copy for Pencil"
-              title="Copy for Pencil (current values baked into @default)"
-              onClick={copyGlsl}
-            >
-              {copied ? <Check /> : <ClipboardCopy />}
-            </Button>
-          )}
-          {selected && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Download .glsl"
-              title="Download .glsl"
-              onClick={downloadGlsl}
-            >
-              <Download />
-            </Button>
-          )}
-          {selected && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={running ? 'Pause' : 'Play'}
-              title={running ? 'Pause (Space)' : 'Play (Space)'}
-              onClick={() => setRunning((r) => !r)}
-            >
-              {running ? <Pause /> : <Play />}
-            </Button>
-          )}
-        </div>
       </header>
 
       <div className="relative flex min-h-0 flex-1">
@@ -580,6 +683,8 @@ export default function App() {
           <ErrorBoundary key={selectedId} label="Settings crashed">
             <SettingsColumn
               title="Settings"
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
               storageKey={selectedId}
               schema={parsed.schema}
               value={presetStore.values}

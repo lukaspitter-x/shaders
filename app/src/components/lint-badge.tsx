@@ -30,7 +30,7 @@ export function LintBadge({ findings }: { findings: LintFinding[] }) {
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[340px] p-0">
+      <PopoverContent align="start" className="w-[calc(100vw-1rem)] max-w-[340px] p-0">
         <div className="border-b border-border px-3 py-2">
           <p className="heading">Pencil compatibility</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
