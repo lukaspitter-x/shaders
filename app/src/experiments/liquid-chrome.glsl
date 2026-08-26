@@ -1,5 +1,5 @@
 /**
- * Chrome Tiles — a wall of touching chrome primitives reflecting a liquid
+ * Liquid Chrome — one 3D primitive filling the canvas, reflecting a liquid
  * pastel environment.
  *
  * Derived from Lea Rosema's "Yet another fork of cheapNoise inception"
@@ -7,22 +7,18 @@
  * `cheapNoise` field straight onto the screen with a four-color palette and a
  * `color / (n² + 7n)` tone curve — that curve is what gives it the liquid-
  * chrome streaks. Here the same field is no longer the picture: it is the
- * *environment* being reflected by a tiling of 3D primitives, so the streaks
- * bend around tubes, rings, domes and rounded boxes instead of drifting
- * randomly.
+ * *environment* being reflected by a single primitive (tube, ring, dome,
+ * rounded box, pyramid, half-pipe or flat plate), so the streaks bend around
+ * a solid instead of drifting randomly.
  *
- * Construction (all analytic, Pencil-safe, no raymarching):
- *  1. The canvas is cut into square cells (optionally quadtree-split so big
- *     and small pieces sit side by side). Every primitive fills its cell
- *     edge-to-edge, so neighbours touch with no gaps.
- *  2. Each cell hashes to a primitive + orientation. The primitive's surface
- *     normal is reconstructed from the local cell coordinate (cylinder:
- *     z = sqrt(1 - y²), torus, sphere cap, rounded box bevel, pyramid,
- *     half-pipe, flat plate).
- *  3. The orthographic reflection vector indexes the warped noise field,
- *     which is mapped through the palette + tone curve, then shaded with a
- *     studio horizon, a key-light specular and a fresnel rim. Seams between
- *     cells get a contact-shadow so the pieces read as separate solids.
+ * Construction (all analytic, Pencil-safe, no raymarching): the primitive's
+ * surface normal is reconstructed from the canvas coordinate (cylinder:
+ * z = sqrt(1 - y²), torus, sphere cap, rounded-box bevel, pyramid faces). The
+ * orthographic reflection vector indexes the warped noise field, which is
+ * mapped through the palette + tone curve, then shaded with a studio horizon,
+ * a key-light specular and a fresnel rim. Where a primitive doesn't cover the
+ * canvas (outside a ring or dome) a flat chrome plate fills in, so the fill
+ * is always full-quad.
  */
 
 /** @resolution */
@@ -31,60 +27,54 @@ uniform vec2 u_resolution;
 /** @time */
 uniform float u_time;
 
-// SECTION: Tiling
+// SECTION: Shape
 /**
- * Base size of one primitive cell, in canvas pixels. Cells are always square.
- * @label Cell Size
- * @default 180
- * @range 40, 600
- */
-uniform float u_cell;
-
-/**
- * Chance that a cell is quartered into four smaller primitives (applied up to
- * two levels deep). 0 keeps a uniform grid; higher mixes big and small pieces.
- * @label Subdivide
- * @default 0.35
- * @range 0, 1
- */
-uniform float u_split;
-
-/**
- * Which primitives appear. "Mixed" draws all of them per cell hash; the
- * others force a single family (with its own hashed orientations).
- * @label Shapes
- * @select Mixed, Tubes, Rings, Domes, Boxes, Pyramids, Half-Pipes, Plates
+ * Which primitive fills the canvas.
+ * @label Primitive
+ * @select Tube, Ring, Dome, Box, Pyramid, Half-Pipe, Plate
  * @default 0
  */
-uniform float u_shapeSet;
+uniform float u_shape;
 
 /**
- * Reshuffles which primitive lands in which cell.
- * @label Seed
- * @default 7
- * @range 0, 100
- */
-uniform float u_seed;
-
-/**
- * Nudge the tiling across the canvas (fraction of one base cell).
- * @label Offset X
+ * Rotation of the primitive in the canvas plane, degrees.
+ * @label Rotation
  * @default 0
- * @range -1, 1
+ * @range 0, 360
  */
-uniform float u_offsetX;
+uniform float u_rotation;
 
 /**
- * @label Offset Y
- * @default 0
- * @range -1, 1
+ * Scale of the primitive relative to the canvas. 1 fits the short side;
+ * larger crops into the surface, smaller leaves a flat chrome border.
+ * @label Size
+ * @default 1
+ * @range 0.3, 2.5
  */
-uniform float u_offsetY;
+uniform float u_size;
+
+/**
+ * Stretch along the primitive's own x axis (before rotation). 1 is square;
+ * "Fill" mode stretches the box / pyramid / plate to the canvas instead.
+ * @label Stretch
+ * @default 1
+ * @range 0.3, 3
+ */
+uniform float u_stretch;
+
+/**
+ * Stretch the box, pyramid and plate to the full canvas aspect instead of
+ * using Size + Stretch.
+ * @label Fill Canvas
+ * @switch
+ * @default true
+ */
+uniform float u_fill;
 
 // SECTION: Relief
 /**
- * How steeply the primitives bulge out of the plane. Low is a soft embossed
- * relief, high is fully round solids.
+ * How steeply the surface bulges out of the plane. Low is a soft embossed
+ * relief, high is a fully round solid.
  * @label Relief
  * @default 1
  * @range 0.2, 2.5
@@ -92,8 +82,8 @@ uniform float u_offsetY;
 uniform float u_relief;
 
 /**
- * Corner rounding of the box primitive as a fraction of its half-width.
- * 1 turns the box into a full cushion dome.
+ * Corner rounding of the box as a fraction of its half-width. 1 turns the
+ * box into a full cushion dome.
  * @label Box Rounding
  * @default 0.45
  * @range 0.1, 1
@@ -101,7 +91,7 @@ uniform float u_relief;
 uniform float u_boxRound;
 
 /**
- * Tube thickness of the ring primitive as a fraction of its radius.
+ * Tube thickness of the ring as a fraction of its radius.
  * @label Ring Thickness
  * @default 0.42
  * @range 0.15, 0.6
@@ -109,12 +99,12 @@ uniform float u_boxRound;
 uniform float u_ringThick;
 
 /**
- * Dark contact shadow along the seams where primitives touch.
- * @label Seam Shadow
- * @default 0.55
+ * Dark contact shadow where the primitive meets the flat plate around it.
+ * @label Contact Shadow
+ * @default 0.5
  * @range 0, 1
  */
-uniform float u_seam;
+uniform float u_contact;
 
 // SECTION: Palette
 /**
@@ -213,13 +203,13 @@ uniform float u_lightAngle;
  * Strength of the studio horizon split: bright sky above, dark floor below,
  * on top of the liquid field.
  * @label Horizon
- * @default 0.5
+ * @default 0.7
  * @range 0, 1
  */
 uniform float u_horizon;
 
 /**
- * Hard key-light highlight on each primitive.
+ * Hard key-light highlight.
  * @label Specular
  * @default 0.6
  * @range 0, 2
@@ -234,14 +224,8 @@ uniform float u_specular;
  */
 uniform float u_fresnel;
 
-const float PI = 3.141592654;
-
 float hash21(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7)) + u_seed * 17.31) * 43758.5453);
-}
-
-float hash31(vec2 p, float k) {
-  return fract(sin(dot(p, vec2(269.5, 183.3)) + k * 97.7 + u_seed * 11.13) * 43758.5453);
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
 // The pen's "just a bunch of sin & cos" field, verbatim apart from the shared
@@ -278,86 +262,97 @@ vec3 liquidEnv(vec2 st) {
 }
 
 /**
- * Surface normal of primitive `kind` at local cell coordinate q ∈ [-1,1]².
- * Every primitive spans the full cell so neighbours touch. Returns the
- * unnormalised (slope-scaled) normal; z is positive toward the viewer.
+ * Surface normal of the primitive at local coordinate q, where the primitive
+ * spans [-ext, ext]. Returns the unnormalised normal (z toward the viewer)
+ * and writes the signed distance to the primitive's silhouette (in q units,
+ * negative inside) to `edge` for the contact shadow.
  */
-vec3 primitiveNormal(float kind, vec2 q) {
+vec3 primitiveNormal(vec2 q, vec2 ext, out float edge) {
   vec3 n = vec3(0.0, 0.0, 1.0);
-  float r = length(q);
+  edge = 1.0;
+  vec2 qn = q / ext; // unit-square coordinates
+  float r = length(qn);
 
-  if (kind < 0.5) {
-    // Tube along x: cylinder cross-section in y.
-    float y = clamp(q.y, -1.0, 1.0);
+  if (u_shape < 0.5) {
+    // Tube along x: cylinder cross-section in y, runs edge-to-edge in x.
+    float y = clamp(qn.y, -1.0, 1.0);
     n = vec3(0.0, y, sqrt(max(1.0 - y * y, 0.0)));
-  } else if (kind < 1.5) {
-    // Ring: torus lying flat, outer edge touching the cell boundary.
+    edge = (abs(qn.y) - 1.0) * ext.y;
+  } else if (u_shape < 1.5) {
+    // Ring: torus lying flat.
     float minor = u_ringThick;
     float major = 1.0 - minor;
     float d = (r - major) / minor;
     if (abs(d) < 1.0 && r > 1e-4) {
-      vec2 dir = q / r;
+      vec2 dir = qn / r;
       n = vec3(dir * d, sqrt(max(1.0 - d * d, 0.0)));
     }
-  } else if (kind < 2.5) {
-    // Dome: sphere cap; the corners outside the circle stay flat.
-    if (r < 1.0) n = vec3(q, sqrt(max(1.0 - r * r, 0.0)));
-  } else if (kind < 3.5) {
-    // Rounded box: flat top, quarter-round bevel of radius `b`.
-    float b = u_boxRound;
-    vec2 e = max(abs(q) - (1.0 - b), 0.0);
+    edge = (abs(r - major) - minor) * ext.x;
+  } else if (u_shape < 2.5) {
+    // Dome: sphere cap.
+    if (r < 1.0) n = vec3(qn, sqrt(max(1.0 - r * r, 0.0)));
+    edge = (r - 1.0) * ext.x;
+  } else if (u_shape < 3.5) {
+    // Rounded box: flat top, quarter-round bevel of radius `b` (in units of
+    // the shorter half-extent so corners stay circular when stretched).
+    float b = u_boxRound * min(ext.x, ext.y);
+    vec2 inner = ext - b;
+    vec2 e = max(abs(q) - inner, 0.0);
     float el = length(e);
     if (el > 1e-4) {
       float s = min(el / b, 1.0);
       n = vec3(sign(q) * (e / el) * s, sqrt(max(1.0 - s * s, 0.0)));
     }
-  } else if (kind < 4.5) {
-    // Pyramid: four planar faces.
+    edge = el - b;
+  } else if (u_shape < 4.5) {
+    // Pyramid: four planar faces meeting at the centre.
     float slope = 0.9;
-    if (abs(q.x) > abs(q.y)) n = vec3(sign(q.x) * slope, 0.0, 1.0);
+    vec2 a = abs(qn);
+    if (a.x > a.y) n = vec3(sign(q.x) * slope, 0.0, 1.0);
     else n = vec3(0.0, sign(q.y) * slope, 1.0);
-  } else if (kind < 5.5) {
+    edge = (max(a.x, a.y) - 1.0) * min(ext.x, ext.y);
+  } else if (u_shape < 5.5) {
     // Half-pipe: the tube carved inward.
-    float y = clamp(q.y, -1.0, 1.0);
+    float y = clamp(qn.y, -1.0, 1.0);
     n = vec3(0.0, -y, sqrt(max(1.0 - y * y, 0.0)));
+    edge = (abs(qn.y) - 1.0) * ext.y;
   }
-  // kind >= 5.5: plate — flat.
+  // u_shape >= 5.5: plate — flat.
   return n;
 }
 
 void main() {
   vec2 frag = gl_FragCoord.xy;
-  float cell = max(u_cell, 4.0);
-  vec2 p = (frag + vec2(u_offsetX, u_offsetY) * cell) / cell;
+  vec2 res = u_resolution;
+  float shortSide = min(res.x, res.y);
 
-  // Quadtree split: up to two hashed subdivisions per base cell.
-  float scale = 1.0;
-  vec2 id = floor(p);
-  for (int i = 0; i < 2; i++) {
-    if (hash31(id, 3.0 + float(i)) < u_split) {
-      scale *= 2.0;
-      id = floor(p * scale);
-    }
+  // Canvas coordinate with the short side spanning [-1, 1].
+  vec2 c = (frag - 0.5 * res) / (0.5 * shortSide);
+
+  // Rotate into the primitive's local frame.
+  float ang = radians(u_rotation);
+  float ca = cos(ang);
+  float sa = sin(ang);
+  vec2 q = vec2(ca * c.x + sa * c.y, -sa * c.x + ca * c.y);
+
+  // Primitive half-extents in local units.
+  vec2 ext = vec2(u_stretch, 1.0) * u_size;
+  bool fillable = u_shape > 2.5; // box, pyramid, plate (+ half-pipe/tube run edge-to-edge anyway)
+  if (u_fill > 0.5 && fillable) {
+    // Stretch to the rotated canvas: extents of the canvas rectangle projected
+    // onto the local axes.
+    vec2 hs = res / shortSide;
+    ext = vec2(abs(ca) * hs.x + abs(sa) * hs.y, abs(sa) * hs.x + abs(ca) * hs.y);
   }
-  vec2 f = fract(p * scale);
-  vec2 q = f * 2.0 - 1.0;
+  if (u_shape < 0.5 || (u_shape > 4.5 && u_shape < 5.5)) {
+    // Tube / half-pipe: run the full canvas length along x regardless.
+    ext.x = 1e4;
+  }
 
-  // Per-cell primitive + orientation.
-  float kind;
-  if (u_shapeSet < 0.5) kind = floor(hash31(id, 1.0) * 6.999);
-  else kind = u_shapeSet - 1.0;
-  float orient = hash31(id, 2.0);
-  vec2 ql = q;
-  if (orient < 0.25) ql = vec2(q.y, -q.x);
-  else if (orient < 0.5) ql = -q;
-  else if (orient < 0.75) ql = vec2(-q.y, q.x);
-
-  vec3 nl = primitiveNormal(kind, ql);
-  // Rotate the normal back into screen space with the inverse of `ql`.
-  vec2 nxy = nl.xy;
-  if (orient < 0.25) nxy = vec2(-nl.y, nl.x);
-  else if (orient < 0.5) nxy = -nl.xy;
-  else if (orient < 0.75) nxy = vec2(nl.y, -nl.x);
+  float edge;
+  vec3 nl = primitiveNormal(q, ext, edge);
+  // Rotate the normal back into screen space.
+  vec2 nxy = vec2(ca * nl.x - sa * nl.y, sa * nl.x + ca * nl.y);
   vec3 n = normalize(vec3(nxy * u_relief, nl.z));
 
   // Orthographic reflection.
@@ -366,9 +361,9 @@ void main() {
 
   // Environment lookup: blend between mirror (reflection direction) and the
   // pen's original flat screen-space paint.
-  vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
-  vec2 screenSt = (frag / u_resolution) * aspect;
-  vec2 mirrorSt = r.xy * 0.28 + screenSt * 0.3;
+  vec2 aspect = vec2(res.x / res.y, 1.0);
+  vec2 screenSt = (frag / res) * aspect;
+  vec2 mirrorSt = r.xy * 0.55 + screenSt * 0.1;
   vec2 st = mix(screenSt, mirrorSt, u_mirror) * u_envScale * 2.0;
   vec3 env = liquidEnv(st);
 
@@ -380,19 +375,21 @@ void main() {
   float studio = mix(0.55, 1.35, horizon);
   env *= mix(1.0, studio, u_horizon);
 
+  // Steep slopes reflect back toward the viewer — a dark room, not the sky.
+  float back = clamp(-r.z, 0.0, 1.0);
+  env *= mix(1.0, 0.2, back * back * 0.9);
+
   // Key-light specular + fresnel rim.
   vec3 l = normalize(vec3(up * 0.8, 0.9));
   vec3 h = normalize(l + v);
   float spec = pow(max(dot(n, h), 0.0), 48.0) * u_specular;
   float rim = pow(1.0 - clamp(n.z, 0.0, 1.0), 4.0) * u_fresnel;
 
-  // Contact shadow along the cell seams, in pixels so it holds at any scale.
-  float px = cell / scale;
-  vec2 edgeDist = (0.5 - abs(f - 0.5)) * px;
-  float seamD = min(edgeDist.x, edgeDist.y);
-  float seam = 1.0 - smoothstep(0.0, 6.0 + px * 0.04, seamD);
-  seam *= (1.0 - nl.z * 0.5); // flat plates keep a thinner seam
-  env *= 1.0 - u_seam * seam * 0.85;
+  // Contact shadow on the flat plate just outside the primitive's silhouette,
+  // measured in pixels so it holds at any canvas size.
+  float edgePx = edge * 0.5 * shortSide;
+  float contact = (1.0 - smoothstep(0.0, 18.0, edgePx)) * step(0.0, edgePx);
+  env *= 1.0 - u_contact * contact * 0.7;
 
   vec3 col = env + vec3(spec) + vec3(rim) * (0.4 + 0.6 * env);
 

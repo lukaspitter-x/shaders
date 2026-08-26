@@ -252,6 +252,14 @@ undo history is in-memory only.
 
 ## Lessons (project gotchas)
 
+- **GLSL ES reserved words compile in nothing.** `half` (also `short`, `long`,
+  `fixed`, `input`, `output`, `sizeof`, `namespace`, …) is a reserved identifier
+  in ES 1.00 — `vec2 half = …` fails in WebGL *and* Pencil. The linter doesn't
+  catch this yet; the preview's compile-error overlay does. Prefer `hs`/`halfSize`.
+- **Fetching CodePen sources.** `codepen.io/<user>/pen/<id>.js|.html` and
+  `/full/` are Cloudflare-gated for curl/WebFetch, but the fullpage embed at
+  `https://cdpn.io/<user>/fullpage/<id>` returns the pen inline in an iframe
+  `srcdoc` (HTML-escaped) — `html.unescape` it and the shader is there verbatim.
 - **Schema/values desync on source switch crashes a control.** Switching shaders
   recomputes the schema immediately, but the `values` state (reset via effect)
   lags one render — so a new control (`soft-shape`'s `u_color`) read an
