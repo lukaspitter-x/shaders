@@ -12,6 +12,7 @@
  * time (see `glsl/parse-annotations.ts`).
  */
 import chromeSource from './chrome.glsl?raw';
+import chromeTilesSource from './chrome-tiles.glsl?raw';
 import flipPlasmaSource from './flip-plasma.glsl?raw';
 import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
@@ -33,6 +34,7 @@ export interface ShaderExperiment {
 
 export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'chrome', label: 'Chrome', type: 'fill', source: chromeSource },
+  { id: 'chrome-tiles', label: 'Chrome Tiles', type: 'fill', source: chromeTilesSource },
   { id: 'flip-plasma', label: 'Flip Plasma', type: 'fill', source: flipPlasmaSource },
   { id: 'gradient', label: 'Gradient', type: 'fill', source: gradientSource },
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
