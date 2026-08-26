@@ -1,24 +1,23 @@
 /**
- * Liquid Chrome — one 3D primitive filling the canvas, reflecting a liquid
- * pastel environment.
+ * Liquid Chrome — one 3D primitive filling the canvas, reflecting a studio
+ * environment with a gentle liquid ripple.
  *
- * Derived from Lea Rosema's "Yet another fork of cheapNoise inception"
- * (codepen.io/learosema/pen/WNpGKpz). The pen paints a domain-warped
- * `cheapNoise` field straight onto the screen with a four-color palette and a
- * `color / (n² + 7n)` tone curve — that curve is what gives it the liquid-
- * chrome streaks. Here the same field is no longer the picture: it is the
- * *environment* being reflected by a single primitive (tube, ring, dome,
- * rounded box, pyramid, half-pipe or flat plate), so the streaks bend around
- * a solid instead of drifting randomly.
+ * Started from Lea Rosema's "Yet another fork of cheapNoise inception"
+ * (codepen.io/learosema/pen/WNpGKpz). The pen paints its domain-warped
+ * `cheapNoise` field straight onto the screen; used as a reflection that
+ * reads as boiling soup, not metal. Real chrome reflects *structure*: a dark
+ * floor, a glowing horizon line, a bright sky and a few softbox stripes. So
+ * that studio is the environment here, and the pen's warped field survives
+ * only as a low-frequency ripple of the lookup direction (Liquid).
  *
  * Construction (all analytic, Pencil-safe, no raymarching): the primitive's
  * surface normal is reconstructed from the canvas coordinate (cylinder:
  * z = sqrt(1 - y²), torus, sphere cap, rounded-box bevel, pyramid faces). The
- * orthographic reflection vector indexes the warped noise field, which is
- * mapped through the palette + tone curve, then shaded with a studio horizon,
- * a key-light specular and a fresnel rim. Where a primitive doesn't cover the
- * canvas (outside a ring or dome) a flat chrome plate fills in, so the fill
- * is always full-quad.
+ * orthographic reflection vector becomes (elevation, azimuth) in a frame
+ * oriented by the light angle, which indexes the studio; then a key-light
+ * specular and a fresnel rim. Where a primitive doesn't cover the canvas
+ * (outside a ring or dome) a flat chrome plate fills in, so the fill is
+ * always full-quad.
  */
 
 /** @resolution */
@@ -108,82 +107,133 @@ uniform float u_contact;
 
 // SECTION: Palette
 /**
- * Base of the reflected environment (the pen's color1).
- * @label Color 1
+ * Sky / highlight tone of the reflected studio.
+ * @label Sky
  * @color
  * @default #ffffff
  */
 uniform vec3 u_color1;
 
 /**
- * Tone that fills in where the noise density is high (the pen's color2).
- * @label Color 2
+ * Glow tone just above the horizon line.
+ * @label Horizon Glow
  * @color
  * @default #ffafaf
  */
 uniform vec3 u_color2;
 
 /**
- * Tone driven by the first warp layer (the pen's color3).
- * @label Color 3
+ * Ground / floor tone below the horizon.
+ * @label Ground
  * @color
- * @default #0099ff
+ * @default #1a2436
  */
 uniform vec3 u_color3;
 
 /**
- * Tone driven by the second warp layer (the pen's color4).
- * @label Color 4
+ * Tint of the softbox stripes.
+ * @label Stripe
  * @color
  * @default #aaffff
  */
 uniform vec3 u_color4;
 
 /**
- * Overall brightness of the reflected field after the pen's tone curve.
+ * Overall brightness of the reflected environment.
  * @label Exposure
- * @default 2.4
- * @range 0.5, 6
+ * @default 1
+ * @range 0.2, 3
  */
 uniform float u_exposure;
 
 // SECTION: Environment
 /**
- * How much the noise field is looked up by reflection direction (chrome
- * mirror) versus by screen position (the original pen's flat paint).
+ * How much the environment is looked up by reflection direction (true
+ * mirror) versus by screen position (flat, painted-on).
  * @label Mirror
- * @default 0.85
+ * @default 0.9
  * @range 0, 1
  */
 uniform float u_mirror;
 
 /**
- * Zoom of the noise field in the environment (the pen's scale).
- * @label Env Scale
- * @default 0.6
- * @range 0.1, 3
+ * Virtual-camera perspective. 0 is a flat orthographic mirror; higher sweeps
+ * the environment across flat faces (the diagonal streaks of chrome plates).
+ * @label Perspective
+ * @default 0.4
+ * @range 0, 1
  */
-uniform float u_envScale;
+uniform float u_persp;
 
 /**
- * Frequency multiplier of the cheapNoise sine stack (the pen's ax..aw).
- * @label Noise Detail
+ * Sharpness of the sky/ground divide — the classic chrome horizon line.
+ * @label Horizon Sharpness
  * @default 0.7
- * @range 0.3, 2.5
+ * @range 0, 1
  */
-uniform float u_detail;
+uniform float u_horizonSharp;
 
 /**
- * Domain-warp strength (the pen's bx / by). Higher folds the streaks over
- * themselves.
- * @label Warp
- * @default 1
- * @range -1.5, 1.5
+ * Shifts the horizon: negative shows more dark ground on flat faces,
+ * positive more sky.
+ * @label Horizon Tilt
+ * @default 0.1
+ * @range -1, 1
+ */
+uniform float u_tilt;
+
+/**
+ * Number of softbox stripes around the environment. 0 disables.
+ * @label Stripes
+ * @default 3
+ * @range 0, 12
+ */
+uniform float u_stripes;
+
+/**
+ * Width of each softbox stripe as a fraction of its cell.
+ * @label Stripe Width
+ * @default 0.3
+ * @range 0.05, 0.9
+ */
+uniform float u_stripeWidth;
+
+/**
+ * Edge softness of the stripes. 0 is hard studio flags.
+ * @label Stripe Softness
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_stripeSoft;
+
+/**
+ * Brightness of the stripes.
+ * @label Stripe Strength
+ * @default 0.8
+ * @range 0, 1.5
+ */
+uniform float u_stripeAmt;
+
+/**
+ * Liquid ripple of the environment (the pen's warped cheapNoise, applied as
+ * a gentle low-frequency distortion of the reflection instead of as the
+ * picture). 0 is a perfectly still studio.
+ * @label Liquid
+ * @default 0.25
+ * @range 0, 1
  */
 uniform float u_warp;
 
 /**
- * Drift speed of the liquid field.
+ * Spatial scale of the liquid ripple. Lower is broader, calmer waves.
+ * @label Liquid Scale
+ * @default 0.35
+ * @range 0.1, 1.5
+ */
+uniform float u_detail;
+
+/**
+ * Drift speed of the liquid ripple.
  * @label Speed
  * @default 0.35
  * @range 0, 2
@@ -198,15 +248,6 @@ uniform float u_speed;
  * @range 0, 360
  */
 uniform float u_lightAngle;
-
-/**
- * Strength of the studio horizon split: bright sky above, dark floor below,
- * on top of the liquid field.
- * @label Horizon
- * @default 0.7
- * @range 0, 1
- */
-uniform float u_horizon;
 
 /**
  * Hard key-light highlight.
@@ -228,11 +269,10 @@ float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-// The pen's "just a bunch of sin & cos" field, verbatim apart from the shared
-// frequency multiplier.
+// The pen's "just a bunch of sin & cos" field, verbatim.
 float cheapNoise(vec3 stp) {
   vec3 p = vec3(stp.xy, stp.z);
-  vec4 a = vec4(5.0, 7.0, 9.0, 13.0) * u_detail;
+  vec4 a = vec4(5.0, 7.0, 9.0, 13.0);
   return mix(
     sin(p.z + p.x * a.x + cos(p.x * a.x - p.z)) *
       cos(p.z + p.y * a.y + cos(p.y * a.x + p.z)),
@@ -242,23 +282,48 @@ float cheapNoise(vec3 stp) {
   );
 }
 
-/** Liquid environment: warped noise → four-color palette → tone curve. */
-vec3 liquidEnv(vec2 st) {
+/** Gentle 2D ripple from the pen's warped cheapNoise field. */
+vec2 liquidRipple(vec2 st) {
   float t = u_time * u_speed;
   float S = sin(t * 0.05);
   float C = cos(t * 0.05);
   vec2 v1 = vec2(cheapNoise(vec3(st, 2.0)), cheapNoise(vec3(st, 1.0)));
   vec2 v2 = vec2(
-    cheapNoise(vec3(st + u_warp * v1 + vec2(C * 1.7, S * 9.2), 0.15 * t)),
-    cheapNoise(vec3(st + u_warp * v1 + vec2(S * 8.3, C * 2.8), 0.126 * t))
+    cheapNoise(vec3(st + 0.5 * v1 + vec2(C * 1.7, S * 9.2), 0.15 * t)),
+    cheapNoise(vec3(st + 0.5 * v1 + vec2(S * 8.3, C * 2.8), 0.126 * t))
   );
-  float n = 0.5 + 0.5 * cheapNoise(vec3(st + v2, 0.0));
+  return v2;
+}
 
-  vec3 color = mix(u_color1, u_color2, clamp(n * n * 8.0, 0.0, 1.0));
-  color = mix(color, u_color3, clamp(length(v1), 0.0, 1.0));
-  color = mix(color, u_color4, clamp(abs(v2.x), 0.0, 1.0));
-  color /= n * n + n * 7.0;
-  return color * u_exposure;
+/**
+ * Studio environment for a reflection vector: dark ground, glowing horizon
+ * line, bright sky, and vertical softbox stripes — the bands real chrome
+ * reflects. `elev` is signed height above the horizon, `azim` the angle
+ * around the vertical axis.
+ */
+vec3 studioEnv(float elev, float azim) {
+  float soft = mix(0.4, 0.01, u_horizonSharp);
+  float horizon = smoothstep(-soft, soft, elev);
+
+  // Sky: brightest just above the horizon, easing toward the zenith.
+  float skyT = clamp(elev, 0.0, 1.0);
+  vec3 sky = mix(u_color2, u_color1 * 0.62, smoothstep(0.0, 0.3, skyT));
+  sky *= mix(1.0, 0.75, smoothstep(0.3, 1.0, skyT));
+  // Ground: darkest straight down, lifting slightly toward the horizon.
+  float gT = clamp(-elev, 0.0, 1.0);
+  vec3 ground = u_color3 * mix(1.0, 0.3, gT);
+  vec3 env = mix(ground, sky, horizon);
+
+  // Softbox stripes around the azimuth, above the horizon only.
+  if (u_stripes > 0.5) {
+    float phase = azim * u_stripes * 0.15915494309; // /2π
+    float local = abs(fract(phase) - 0.5);
+    float hw = u_stripeWidth * 0.5;
+    float feather = mix(0.005, 0.2, u_stripeSoft);
+    float stripe = 1.0 - smoothstep(hw - feather, hw + feather, local);
+    env += u_color4 * stripe * u_stripeAmt * horizon;
+  }
+  return env * u_exposure;
 }
 
 /**
@@ -355,25 +420,30 @@ void main() {
   vec2 nxy = vec2(ca * nl.x - sa * nl.y, sa * nl.x + ca * nl.y);
   vec3 n = normalize(vec3(nxy * u_relief, nl.z));
 
-  // Orthographic reflection.
-  vec3 v = vec3(0.0, 0.0, 1.0);
-  vec3 r = 2.0 * n.z * n - v;
+  // View ray from a virtual camera above the canvas centre; u_persp = 0
+  // degenerates to the straight-on orthographic view.
+  vec3 v = normalize(vec3(-c * u_persp, 1.0));
+  vec3 r = 2.0 * dot(n, v) * n - v;
 
-  // Environment lookup: blend between mirror (reflection direction) and the
-  // pen's original flat screen-space paint.
-  vec2 aspect = vec2(res.x / res.y, 1.0);
-  vec2 screenSt = (frag / res) * aspect;
-  vec2 mirrorSt = r.xy * 0.55 + screenSt * 0.1;
-  vec2 st = mix(screenSt, mirrorSt, u_mirror) * u_envScale * 2.0;
-  vec3 env = liquidEnv(st);
-
-  // Studio horizon over the liquid field, oriented by the light angle.
+  // Reflection → (elevation, azimuth) in the light-oriented frame, blended
+  // with screen position for the flat "painted-on" look.
   float la = radians(u_lightAngle);
   vec2 up = vec2(cos(la), sin(la));
-  float elev = dot(r.xy, up);
-  float horizon = smoothstep(-0.35, 0.35, elev);
-  float studio = mix(0.55, 1.35, horizon);
-  env *= mix(1.0, studio, u_horizon);
+  vec2 side = vec2(-up.y, up.x);
+  vec2 aspect = vec2(res.x / res.y, 1.0);
+  vec2 screenC = ((frag / res) - 0.5) * aspect * 2.0;
+  vec2 dir = mix(screenC, r.xy, u_mirror);
+  float depth = mix(0.3, r.z, u_mirror);
+
+  // Liquid ripple: low-frequency distortion of the lookup direction.
+  vec2 st = (screenC * 0.5 + r.xy * 0.25) * u_detail;
+  vec2 ripple = liquidRipple(st) * u_warp * 0.35;
+  dir += ripple;
+
+  float elev = dot(dir, up) + u_tilt;
+  // Floor the depth so the azimuth has no pole (no stripes whirling into a point).
+  float azim = atan(dot(dir, side), max(depth, 0.0) + 0.5);
+  vec3 env = studioEnv(elev, azim);
 
   // Steep slopes reflect back toward the viewer — a dark room, not the sky.
   float back = clamp(-r.z, 0.0, 1.0);

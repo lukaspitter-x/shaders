@@ -33,13 +33,13 @@ describe('liquid-chrome.glsl', () => {
     expect(defaults.u_shape).toBe('0');
   });
 
-  it("keeps the source pen's four-color palette", () => {
+  it('maps a four-color studio palette (sky, horizon glow, ground, stripe)', () => {
     const { schema, defaults } = parseShader(source);
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
     expect(colors).toEqual(['u_color1', 'u_color2', 'u_color3', 'u_color4']);
     expect(defaults.u_color1).toBe('#ffffff');
     expect(defaults.u_color2).toBe('#ffafaf');
-    expect(defaults.u_color3).toBe('#0099ff');
+    expect(defaults.u_color3).toBe('#1a2436');
     expect(defaults.u_color4).toBe('#aaffff');
   });
 
