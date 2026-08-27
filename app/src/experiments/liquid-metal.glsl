@@ -96,6 +96,15 @@ uniform float u_linearDirection;
 uniform float u_linearDensity;
 
 /**
+ * Expands each linear band into the gap without changing the stripe count.
+ * 0.5 preserves the current equal-width waveform.
+ * @label Stripe Width
+ * @default 0.5
+ * @range 0.05, 0.95
+ */
+uniform float u_linearStripeWidth;
+
+/**
  * Compresses each sine/cosine transition without adding more stripes. Raise
  * this after lowering Linear Density to retain crisp metallic boundaries.
  * @label Stripe Sharpness
@@ -329,9 +338,17 @@ float sharpenLinearWave(float wave, float sharpness) {
   return mix(wave, sigmoid / max(normalization, 0.0001), blendAmount);
 }
 
-float linearField(vec3 p, vec2 direction, float density, float time, float sharpness) {
+float linearField(
+  vec3 p,
+  vec2 direction,
+  float density,
+  float time,
+  float stripeWidth,
+  float sharpness
+) {
   float phase = dot(p.xy, direction) * 18.0 * density + p.z * 6.0 - time * 0.8;
   float wave = sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
+  wave += (clamp(stripeWidth, 0.05, 0.95) - 0.5) * 1.5;
   return sharpenLinearWave(wave, sharpness);
 }
 
@@ -379,6 +396,7 @@ void main() {
     linearDirection,
     u_linearDensity,
     twistTime,
+    u_linearStripeWidth,
     u_stripeSharpness
   );
   float lx = linearField(
@@ -386,6 +404,7 @@ void main() {
     linearDirection,
     u_linearDensity,
     twistTime,
+    u_linearStripeWidth,
     u_stripeSharpness
   );
   float ly = linearField(
@@ -393,6 +412,7 @@ void main() {
     linearDirection,
     u_linearDensity,
     twistTime,
+    u_linearStripeWidth,
     u_stripeSharpness
   );
   vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
