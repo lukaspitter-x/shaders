@@ -54,6 +54,7 @@ describe('liquid-metal.glsl', () => {
       u_linearMix: 0,
       u_linearDirection: 0,
       u_linearDensity: 1,
+      u_linearScale: 0,
       u_linearStripeWidth: 0.5,
       u_stripeSharpness: 0,
       u_iridescence: 0.907,
@@ -92,6 +93,12 @@ describe('liquid-metal.glsl', () => {
   it('widens linear stripes independently of their density and sharpness', () => {
     expect(source).toContain('(clamp(stripeWidth, 0.05, 0.95) - 0.5) * 1.5');
     expect(source).toContain('u_linearStripeWidth,');
+  });
+
+  it('can decouple stripe scale from ripple scale without changing old presets', () => {
+    expect(source).toContain('u_linearScale > 0.000001 ? u_linearScale : u_scale');
+    expect(source).toContain('vec3 linearP = vec3(localPos * stripeScale, 0.0);');
+    expect(source).toContain('linearP.z += smoothDist * u_shapeReactivity * 150.0 * stripeScale;');
   });
 
   it('can amplify thin-film color without changing the thickness phase', () => {

@@ -96,6 +96,16 @@ uniform float u_linearDirection;
 uniform float u_linearDensity;
 
 /**
+ * Independent spatial scale for the linear bands. At 0 the stripes follow
+ * Ripple Scale for backward compatibility; positive values decouple them.
+ * Lower values produce wider stripes.
+ * @label Stripe Scale
+ * @default 0
+ * @range 0, 0.015
+ */
+uniform float u_linearScale;
+
+/**
  * Expands each linear band into the gap without changing the stripe count.
  * 0.5 preserves the current equal-width waveform.
  * @label Stripe Width
@@ -368,12 +378,17 @@ void main() {
   float smoothDist = smoothstep(0.0, 45.0, shapeDistance) * shaped;
   vec2 maskGrad = shapeDirection * (1.0 - smoothDist) * shaped;
 
+  float stripeScale = u_linearScale > 0.000001 ? u_linearScale : u_scale;
   vec3 p = vec3(localPos * u_scale, 0.0);
+  vec3 linearP = vec3(localPos * stripeScale, 0.0);
   p.z += smoothDist * u_shapeReactivity * 150.0 * u_scale;
+  linearP.z += smoothDist * u_shapeReactivity * 150.0 * stripeScale;
 
   vec2 contourTangent = vec2(-maskGrad.y, maskGrad.x);
   p.xy += contourTangent * (u_time * u_speed * 0.5);
+  linearP.xy += contourTangent * (u_time * u_speed * 0.5);
   p.y -= u_time * u_speed * 0.1;
+  linearP.y -= u_time * u_speed * 0.1;
 
   float twistTime = u_time * u_twistSpeed;
   vec3 warp;
@@ -392,7 +407,7 @@ void main() {
   float linearAngle = radians(u_linearDirection);
   vec2 linearDirection = vec2(cos(linearAngle), sin(linearAngle));
   float l0 = linearField(
-    p,
+    linearP,
     linearDirection,
     u_linearDensity,
     twistTime,
@@ -400,7 +415,7 @@ void main() {
     u_stripeSharpness
   );
   float lx = linearField(
-    p + vec3(eps, 0.0, 0.0),
+    linearP + vec3(eps, 0.0, 0.0),
     linearDirection,
     u_linearDensity,
     twistTime,
@@ -408,7 +423,7 @@ void main() {
     u_stripeSharpness
   );
   float ly = linearField(
-    p + vec3(0.0, eps, 0.0),
+    linearP + vec3(0.0, eps, 0.0),
     linearDirection,
     u_linearDensity,
     twistTime,
