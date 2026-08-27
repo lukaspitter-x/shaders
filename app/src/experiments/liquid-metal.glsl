@@ -117,26 +117,26 @@ uniform float u_linearDensity;
 uniform float u_linearScale;
 
 /**
- * Relative width of the visible metal stripe. Stripe Width and Stripe Gap are
- * normalized into one period, so adjacent stripes can never overlap.
+ * Fraction of each period occupied by the visible metal stripe. At 1 the
+ * original sine/cosine field is continuous across the complete period.
  * @label Stripe Width
- * @default 0.5
- * @range 0.05, 0.95
+ * @default 1
+ * @range 0.05, 1
  */
-uniform float u_linearBandWidth;
+uniform float u_linearBandFraction;
 
 /**
- * Relative empty space between neighboring stripes. Increase this to open the
- * gaps or decrease it to let Stripe Width occupy more of each period.
+ * Additional empty fraction cut from Stripe Width. At 0 the configured width
+ * is preserved; increasing this opens a larger flat gap.
  * @label Stripe Gap
- * @default 0.5
- * @range 0.05, 0.95
+ * @default 0
+ * @range 0, 0.95
  */
-uniform float u_linearStripeWidth;
+uniform float u_linearGapFraction;
 
 /**
- * Compresses each stripe-edge transition without changing its width, gap, or
- * count. Raise this after lowering Linear Density to retain crisp boundaries.
+ * Increases the contrast of the rounded stripe normal without shrinking its
+ * visible width or changing its gap and count.
  * @label Stripe Sharpness
  * @default 0
  * @range 0, 3
@@ -357,18 +357,20 @@ float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float stripeBandProfile(
-  float cycleCoordinate,
-  float stripeFraction,
-  float sharpness
-) {
-  // One centered stripe owns a bounded part of every period. Both transition
-  // limits stay inside that part, which prevents overlaps and broken repeats.
+float linearWave(float phase) {
+  // Exact composite field introduced in 2c3fc47. Its two frequencies are what
+  // gave the original linear mode its broad, liquid-metal character.
+  return sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
+}
+
+float stripeEnvelope(float cycleCoordinate, float stripeFraction) {
+  // The envelope only separates the continuous source field into stripes; it
+  // never replaces the field or differentiates a hard mask boundary.
+  if (stripeFraction > 0.999) return 1.0;
   float distanceFromCenter = abs(fract(cycleCoordinate) - 0.5);
-  float halfStripe = clamp(stripeFraction * 0.5, 0.025, 0.475);
-  float softEdge = halfStripe * mix(0.9, 0.015, clamp(sharpness / 3.0, 0.0, 1.0));
-  float flatEdge = max(halfStripe - softEdge, 0.0);
-  return 1.0 - smoothstep(flatEdge, halfStripe, distanceFromCenter);
+  float halfStripe = clamp(stripeFraction * 0.5, 0.025, 0.499);
+  float feather = min(halfStripe * 0.25, 0.04);
+  return 1.0 - smoothstep(halfStripe - feather, halfStripe, distanceFromCenter);
 }
 
 void main() {
@@ -389,11 +391,15 @@ void main() {
 
   float stripeScale = u_linearScale > 0.000001 ? u_linearScale : u_scale;
   vec3 p = vec3(localPos * u_scale, 0.0);
+  vec3 linearP = vec3(localPos * stripeScale, 0.0);
   p.z += smoothDist * u_shapeReactivity * 150.0 * u_scale;
+  linearP.z += smoothDist * u_shapeReactivity * 150.0 * stripeScale;
 
   vec2 contourTangent = vec2(-maskGrad.y, maskGrad.x);
   p.xy += contourTangent * (u_time * u_speed * 0.5);
+  linearP.xy += contourTangent * (u_time * u_speed * 0.5);
   p.y -= u_time * u_speed * 0.1;
+  linearP.y -= u_time * u_speed * 0.1;
 
   float twistTime = u_time * u_twistSpeed;
   vec3 warp;
@@ -421,39 +427,42 @@ void main() {
   ) / projectionExtent + 0.5;
 
   const float TAU = 6.28318530718;
-  float densityCycle = dot(localPos * stripeScale, linearDirection)
-    * 18.0 * u_linearDensity / TAU - twistTime * 0.8 / TAU;
+  float densityPhase = dot(linearP.xy, linearDirection) * 18.0 * u_linearDensity
+    + linearP.z * 6.0 - twistTime * 0.8;
   float exactCount = max(floor(u_stripeCount + 0.5), 1.0);
   float exactCycle = normalizedProjection * exactCount;
+  float exactPhase = exactCycle * TAU;
+  float linearPhase = u_stripeCount < 0.5 ? densityPhase : exactPhase;
+  float phaseRate = u_stripeCount < 0.5
+    ? 18.0 * u_linearDensity
+    : exactCount * TAU;
+
+  // Width is an actual period fraction; Gap can only remove from it. The final
+  // allocation therefore remains within one period and cannot overlap.
+  float stripeWidth = clamp(u_linearBandFraction, 0.05, 1.0);
+  float gapAmount = clamp(u_linearGapFraction, 0.0, 0.95);
+  float stripeFraction = max(stripeWidth * (1.0 - gapAmount), 0.0025);
+  float densityCycle = densityPhase / (TAU * 2.0);
   float stripeCycle = u_stripeCount < 0.5 ? densityCycle : exactCycle;
+  float envelope = stripeEnvelope(stripeCycle, stripeFraction);
 
-  // Width and gap are relative weights within a single immutable period. Their
-  // normalized fraction always remains below one, even at opposite extremes.
-  float stripeWeight = clamp(u_linearBandWidth, 0.05, 0.95);
-  float gapWeight = clamp(u_linearStripeWidth, 0.05, 0.95);
-  float stripeFraction = stripeWeight / (stripeWeight + gapWeight);
-  float l0 = stripeBandProfile(stripeCycle, stripeFraction, u_stripeSharpness);
-
-  // A symmetric profile sample produces a stable surface normal. Sampling the
-  // same periodic function cannot introduce extra frequencies or overlaps.
-  float profileStep = 0.001;
-  float profileBefore = stripeBandProfile(
-    stripeCycle - profileStep,
-    stripeFraction,
-    u_stripeSharpness
+  // Reconstruct the original finite-difference normal from the sine/cosine
+  // field. The envelope scales that broad normal instead of creating a thin
+  // derivative at the stripe boundary.
+  float l0 = linearWave(linearPhase);
+  float lx = linearWave(linearPhase + eps * linearDirection.x * phaseRate);
+  float ly = linearWave(linearPhase + eps * linearDirection.y * phaseRate);
+  vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
+  float stripeNormalGain = mix(
+    1.0,
+    2.5,
+    clamp(u_stripeSharpness / 3.0, 0.0, 1.0)
   );
-  float profileAfter = stripeBandProfile(
-    stripeCycle + profileStep,
-    stripeFraction,
-    u_stripeSharpness
-  );
-  float stripeSlope = clamp(
-    (profileAfter - profileBefore) / (2.0 * profileStep),
-    -40.0,
-    40.0
-  );
-  vec3 linearNormal = normalize(vec3(linearDirection * stripeSlope * 0.08, 1.0));
-  l0 = l0 * 2.0 - 1.0;
+  vec3 linearNormal = normalize(vec3(
+    linearGradient * 0.15 * envelope * stripeNormalGain,
+    1.0
+  ));
+  l0 = mix(-1.0, l0, envelope);
 
   float linearMix = clamp(u_linearMix, 0.0, 1.0);
   vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);
