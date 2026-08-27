@@ -113,6 +113,15 @@ uniform float u_linearDensity;
 uniform float u_iridescence;
 
 /**
+ * Amplifies the rainbow without changing its thickness or hue progression.
+ * Values around 1–2 make the effect prominent while retaining the metal.
+ * @label Rainbow Boost
+ * @default 0.25
+ * @range 0, 5
+ */
+uniform float u_rainbowBoost;
+
+/**
  * Thin-film index of refraction.
  * @label Index of Refraction
  * @default 1
@@ -249,7 +258,7 @@ vec3 roomEnvironment(vec3 r, float roughness) {
 vec3 thinFilm(float thickness, float ior) {
   float optical = thickness * max(ior, 1.0) * 0.0125;
   vec3 phase = optical * vec3(1.00, 1.17, 1.36);
-  return 0.72 + 0.28 * cos(phase + vec3(0.0, 2.1, 4.2));
+  return 0.5 + 0.5 * cos(phase + vec3(0.0, 2.1, 4.2));
 }
 
 vec3 acesToneMap(vec3 x) {
@@ -345,8 +354,15 @@ void main() {
   float thicknessMix = clamp(fluidNoise * 0.5 + 0.5, 0.0, 1.0);
   float thickness = mix(u_thicknessMin, u_thicknessMax, thicknessMix);
   vec3 film = thinFilm(thickness, u_iridescenceIOR);
-  float filmAmount = u_iridescence * (0.025 + fresnel * 0.28);
-  color = mix(color, color * film, filmAmount);
+  float filmLuminance = max(dot(film, vec3(0.2126, 0.7152, 0.0722)), 0.08);
+  vec3 rainbow = clamp(film / filmLuminance, 0.15, 2.5);
+  float grazingResponse = pow(fresnel, 0.35);
+  float filmAmount = clamp(
+    u_iridescence * u_rainbowBoost * (0.08 + grazingResponse * 0.92),
+    0.0,
+    1.0
+  );
+  color = mix(color, color * rainbow, filmAmount);
 
   vec3 key = normalize(vec3(0.42, 0.72, 0.78));
   vec3 halfVector = normalize(key + view);

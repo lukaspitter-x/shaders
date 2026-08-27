@@ -46,6 +46,7 @@ describe('liquid-metal.glsl', () => {
       u_linearDirection: 0,
       u_linearDensity: 1,
       u_iridescence: 0.907,
+      u_rainbowBoost: 0.25,
       u_iridescenceIOR: 1,
       u_thicknessMin: 759,
       u_thicknessMax: 800,
@@ -67,5 +68,11 @@ describe('liquid-metal.glsl', () => {
     expect(source).toContain('p.xy += contourTangent * (u_time * u_speed * 0.5);');
     expect(source).toContain('vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);');
     expect(source).toContain('float patternNoise = mix(n0, l0, linearMix);');
+  });
+
+  it('can amplify thin-film color without changing the thickness phase', () => {
+    expect(source).toContain('vec3 rainbow = clamp(film / filmLuminance, 0.15, 2.5);');
+    expect(source).toContain('u_iridescence * u_rainbowBoost');
+    expect(source).toContain('0.08 + grazingResponse * 0.92');
   });
 });
