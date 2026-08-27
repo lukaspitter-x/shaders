@@ -17,6 +17,7 @@ import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
 import liquidChromeSource from './liquid-chrome.glsl?raw';
 import liquidMetalSource from './liquid-metal.glsl?raw';
+import mercuryShapeSource from './mercury-shape.glsl?raw';
 import mouseGlowSource from './mouse-glow.glsl?raw';
 import softShapeSource from './soft-shape.glsl?raw';
 import pixelShapeSource from './pixel-shape.glsl?raw';
@@ -51,6 +52,7 @@ export const EXPERIMENTS: ShaderExperiment[] = [
     defaultShapeId: 'rounded-rect',
     source: liquidMetalSource,
   },
+  { id: 'mercury-shape', label: 'Mercury Shape', type: 'fill', source: mercuryShapeSource },
   { id: 'mouse-glow', label: 'Mouse Glow', type: 'fill', source: mouseGlowSource },
   { id: 'soft-shape', label: 'Soft Shape', type: 'fill', source: softShapeSource },
   { id: 'stagger-grid', label: 'Stagger Grid', type: 'fill', source: staggerGridSource },
