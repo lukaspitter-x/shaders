@@ -131,11 +131,11 @@ describe('liquid-metal.glsl', () => {
     const { schema } = parseShader(source);
     const sharpness = schema.find((control) => control.key === 'u_stripeSharpness');
 
-    expect(sharpness).toMatchObject({ min: 0, max: 10 });
+    expect(sharpness).toMatchObject({ min: 0, max: 50 });
     expect(source).toContain('sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25');
     expect(source).toContain('vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;');
     expect(source).toContain('linearGradient * 0.15 * envelope * stripeNormalGain');
-    expect(source).toContain('1.0 + clamp(u_stripeSharpness, 0.0, 10.0) * 0.5');
+    expect(source).toContain('1.0 + clamp(u_stripeSharpness, 0.0, 50.0) * 0.5');
     expect(source).toContain('l0 = mix(-1.0, l0, envelope);');
   });
 

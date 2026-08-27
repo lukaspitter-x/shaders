@@ -139,7 +139,7 @@ uniform float u_linearGapFraction;
  * visible width or changing its gap and count.
  * @label Stripe Sharpness
  * @default 0
- * @range 0, 10
+ * @range 0, 50
  */
 uniform float u_stripeSharpness;
 
@@ -453,9 +453,9 @@ void main() {
   float lx = linearWave(linearPhase + eps * linearDirection.x * phaseRate);
   float ly = linearWave(linearPhase + eps * linearDirection.y * phaseRate);
   vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
-  // Linear gain preserves the previous 0–3 response exactly (3 still yields
-  // 2.5), while allowing the extended 3–10 range to keep adding contrast.
-  float stripeNormalGain = 1.0 + clamp(u_stripeSharpness, 0.0, 10.0) * 0.5;
+  // Linear gain preserves the previous response exactly (3 still yields 2.5
+  // and 10 yields 6), while the extended range keeps adding contrast.
+  float stripeNormalGain = 1.0 + clamp(u_stripeSharpness, 0.0, 50.0) * 0.5;
   vec3 linearNormal = normalize(vec3(
     linearGradient * 0.15 * envelope * stripeNormalGain,
     1.0
