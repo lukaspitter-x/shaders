@@ -34,10 +34,19 @@ describe('liquid-metal.glsl', () => {
     const { schema, defaults } = parseShader(source);
     const sections = [...new Set(schema.map((control) => control.section).filter(Boolean))];
 
-    expect(sections).toEqual(['Fluid Dynamics', 'Iridescence (Rainbow)', 'Base Material']);
+    expect(sections).toEqual([
+      'Fluid Dynamics',
+      'Shape Geometry',
+      'Iridescence (Rainbow)',
+      'Base Material',
+    ]);
     expect(defaults).toMatchObject({
       u_scale: 0.00298,
       u_shapeReactivity: 1,
+      u_shapeDepth: 1,
+      u_bevelWidth: 30,
+      u_bevelProfile: 1,
+      u_shoulder: 0,
       u_distortion: 1.52,
       u_edgeProtection: 1,
       u_speed: 0,
@@ -74,5 +83,12 @@ describe('liquid-metal.glsl', () => {
     expect(source).toContain('vec3 rainbow = clamp(film / filmLuminance, 0.15, 2.5);');
     expect(source).toContain('u_iridescence * u_rainbowBoost');
     expect(source).toContain('0.08 + grazingResponse * 0.92');
+  });
+
+  it('exposes shape-only bevel geometry without affecting an empty SDF', () => {
+    expect(source).toContain('shapeDistance / max(u_bevelWidth, 1.0)');
+    expect(source).toContain('pow(1.0 - bevelT, max(u_bevelProfile, 0.05))');
+    expect(source).toContain('shoulderBand * u_shoulder * 1.6');
+    expect(source).toContain('float bevelSlope = shaped * u_shapeDepth');
   });
 });

@@ -37,14 +37,6 @@ uniform sampler2D u_shape;
 uniform float u_scale;
 
 /**
- * Amount that a blurred host-shape mask offsets the noise in depth.
- * @label Shape Reactivity
- * @default 1
- * @range 0, 5
- */
-uniform float u_shapeReactivity;
-
-/**
  * Strength of the normalized simplex-noise normal added to the base surface.
  * @label Distortion
  * @default 1.52
@@ -102,6 +94,49 @@ uniform float u_linearDirection;
  * @range 0.25, 6
  */
 uniform float u_linearDensity;
+
+// SECTION: Shape Geometry
+/**
+ * Amount that a blurred host-shape mask offsets the noise in depth.
+ * @label Shape Reactivity
+ * @default 1
+ * @range 0, 5
+ */
+uniform float u_shapeReactivity;
+
+/**
+ * Height of the simulated extrusion. At 0 the selected shape has a flat base
+ * surface while retaining its liquid distortion.
+ * @label Depth
+ * @default 1
+ * @range 0, 4
+ */
+uniform float u_shapeDepth;
+
+/**
+ * Distance from the silhouette edge to the flat face, in SDF pixels.
+ * @label Bevel Width
+ * @default 30
+ * @range 2, 120
+ */
+uniform float u_bevelWidth;
+
+/**
+ * Curvature of the edge transition. Values below 1 make a fuller roundover;
+ * values above 1 keep the face flatter before dropping toward the edge.
+ * @label Bevel Profile
+ * @default 1
+ * @range 0.25, 4
+ */
+uniform float u_bevelProfile;
+
+/**
+ * Adds definition where the bevel meets the front face.
+ * @label Shoulder
+ * @default 0
+ * @range 0, 2
+ */
+uniform float u_shoulder;
 
 // SECTION: Iridescence (Rainbow)
 /**
@@ -329,8 +364,11 @@ void main() {
 
   // Reconstruct the fixed extruded/beveled base geometry that Three.js supplies
   // before the source adds its fluid normal. Empty SDFs use a flat face.
-  float bevelT = clamp(shapeDistance / 30.0, 0.0, 1.0);
-  float bevelSlope = shaped * (1.0 - bevelT) * 2.4;
+  float bevelT = clamp(shapeDistance / max(u_bevelWidth, 1.0), 0.0, 1.0);
+  float profileSlope = pow(1.0 - bevelT, max(u_bevelProfile, 0.05));
+  float shoulderBand = 1.0 - smoothstep(0.0, 0.18, abs(bevelT - 0.78));
+  float bevelSlope = shaped * u_shapeDepth
+    * (profileSlope * 2.4 + shoulderBand * u_shoulder * 1.6);
   vec3 originalNormal = normalize(vec3(-shapeDirection * bevelSlope, 1.0));
 
   float isFlatFace = smoothstep(0.1, 0.9, abs(originalNormal.z));
