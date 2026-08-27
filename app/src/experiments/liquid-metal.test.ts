@@ -54,6 +54,7 @@ describe('liquid-metal.glsl', () => {
       u_linearMix: 0,
       u_linearDirection: 0,
       u_linearDensity: 1,
+      u_stripeSharpness: 0,
       u_iridescence: 0.907,
       u_rainbowBoost: 0.25,
       u_iridescenceIOR: 1,
@@ -77,6 +78,13 @@ describe('liquid-metal.glsl', () => {
     expect(source).toContain('p.xy += contourTangent * (u_time * u_speed * 0.5);');
     expect(source).toContain('vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);');
     expect(source).toContain('float patternNoise = mix(n0, l0, linearMix);');
+  });
+
+  it('sharpens linear transitions independently of stripe density', () => {
+    expect(source).toContain('float gain = mix(1.0, 16.0, amount);');
+    expect(source).toContain('return sharpenLinearWave(wave, sharpness);');
+    expect(source).toContain('u_linearDensity,');
+    expect(source).toContain('u_stripeSharpness');
   });
 
   it('can amplify thin-film color without changing the thickness phase', () => {

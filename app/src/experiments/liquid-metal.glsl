@@ -95,6 +95,15 @@ uniform float u_linearDirection;
  */
 uniform float u_linearDensity;
 
+/**
+ * Compresses each sine/cosine transition without adding more stripes. Raise
+ * this after lowering Linear Density to retain crisp metallic boundaries.
+ * @label Stripe Sharpness
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_stripeSharpness;
+
 // SECTION: Shape Geometry
 /**
  * Amount that a blurred host-shape mask offsets the noise in depth.
@@ -309,9 +318,19 @@ float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float linearField(vec3 p, vec2 direction, float density, float time) {
+float sharpenLinearWave(float wave, float sharpness) {
+  float amount = clamp(sharpness, 0.0, 1.0);
+  float gain = mix(1.0, 16.0, amount);
+  float boundedWave = clamp(wave, -1.0, 1.0);
+  float sigmoid = 2.0 / (1.0 + exp(-2.0 * gain * boundedWave)) - 1.0;
+  float normalization = 2.0 / (1.0 + exp(-2.0 * gain)) - 1.0;
+  return mix(wave, sigmoid / max(normalization, 0.0001), amount);
+}
+
+float linearField(vec3 p, vec2 direction, float density, float time, float sharpness) {
   float phase = dot(p.xy, direction) * 18.0 * density + p.z * 6.0 - time * 0.8;
-  return sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
+  float wave = sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
+  return sharpenLinearWave(wave, sharpness);
 }
 
 void main() {
@@ -353,9 +372,27 @@ void main() {
 
   float linearAngle = radians(u_linearDirection);
   vec2 linearDirection = vec2(cos(linearAngle), sin(linearAngle));
-  float l0 = linearField(p, linearDirection, u_linearDensity, twistTime);
-  float lx = linearField(p + vec3(eps, 0.0, 0.0), linearDirection, u_linearDensity, twistTime);
-  float ly = linearField(p + vec3(0.0, eps, 0.0), linearDirection, u_linearDensity, twistTime);
+  float l0 = linearField(
+    p,
+    linearDirection,
+    u_linearDensity,
+    twistTime,
+    u_stripeSharpness
+  );
+  float lx = linearField(
+    p + vec3(eps, 0.0, 0.0),
+    linearDirection,
+    u_linearDensity,
+    twistTime,
+    u_stripeSharpness
+  );
+  float ly = linearField(
+    p + vec3(0.0, eps, 0.0),
+    linearDirection,
+    u_linearDensity,
+    twistTime,
+    u_stripeSharpness
+  );
   vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
   vec3 linearNormal = normalize(vec3(linearGradient * 0.15, 1.0));
 
