@@ -406,6 +406,14 @@ undo history is in-memory only.
   viewer-facing front (dark) and 1 at the silhouette (bright rim) — an eclipse/
   corona by construction. Loop-free, so it's trivially Pencil-safe.
 
+## D10 — `@sdf` is a capability, not always a shape requirement
+
+**Decided 2026-08-27:** Experiments may declare `shapeOptional` in the registry
+when they use `@sdf` for extra contour shading but still produce a meaningful
+full-quad fill from Pencil's empty Rectangle field. The shell exposes Shape =
+None for those experiments; required shape shaders keep their existing guarded
+picker. Shader visibility must remain independent of the SDF in both cases.
+
 ## Pencil contract updates (read from the live app via MCP, 2026-08-21)
 
 - **`@sdf` carries the gradient in gb.** Official contract: r = signed

@@ -160,7 +160,7 @@ export default function App() {
     () => (selected ? lintPencil(downgradePencilDirectives(selected.source)) : []),
     [selected],
   );
-  const requiresShape = !!parsed?.system.sdf;
+  const requiresShape = !!parsed?.system.sdf && !selected?.shapeOptional;
 
   const [previewScale, setPreviewScale] = useLocalStorage<PreviewScale>('previewScale', 'full');
   const hasGrid = parsed?.schema.some((c) => c.key === 'u_gridSize') ?? false;

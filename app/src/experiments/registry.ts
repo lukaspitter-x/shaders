@@ -16,6 +16,7 @@ import flipPlasmaSource from './flip-plasma.glsl?raw';
 import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
 import liquidChromeSource from './liquid-chrome.glsl?raw';
+import liquidMetalSource from './liquid-metal.glsl?raw';
 import mouseGlowSource from './mouse-glow.glsl?raw';
 import softShapeSource from './soft-shape.glsl?raw';
 import pixelShapeSource from './pixel-shape.glsl?raw';
@@ -28,6 +29,8 @@ export interface ShaderExperiment {
   id: string;
   label: string;
   type: 'fill' | 'effect';
+  /** An `@sdf` shader that also renders meaningfully with an empty field. */
+  shapeOptional?: boolean;
   /** Raw GLSL source (imported via `?raw`), in Pencil's annotated dialect. */
   source: string;
 }
@@ -38,6 +41,13 @@ export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'gradient', label: 'Gradient', type: 'fill', source: gradientSource },
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
   { id: 'liquid-chrome', label: 'Liquid Chrome', type: 'fill', source: liquidChromeSource },
+  {
+    id: 'liquid-metal',
+    label: 'Liquid Metal',
+    type: 'fill',
+    shapeOptional: true,
+    source: liquidMetalSource,
+  },
   { id: 'mouse-glow', label: 'Mouse Glow', type: 'fill', source: mouseGlowSource },
   { id: 'soft-shape', label: 'Soft Shape', type: 'fill', source: softShapeSource },
   { id: 'stagger-grid', label: 'Stagger Grid', type: 'fill', source: staggerGridSource },
