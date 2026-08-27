@@ -167,8 +167,8 @@ export default function App() {
 
   // Presets hook — replaces the old useState<ShaderValues> + localStorage persistence.
   const defaultPresetShape = useMemo(
-    () => ({ id: requiresShape ? 'rounded-rect' : 'none', size: 1 }),
-    [requiresShape],
+    () => ({ id: selected?.defaultShapeId ?? (requiresShape ? 'rounded-rect' : 'none'), size: 1 }),
+    [requiresShape, selected?.defaultShapeId],
   );
   const presetStore = usePresets(
     selectedId ?? '',

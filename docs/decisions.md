@@ -412,7 +412,9 @@ undo history is in-memory only.
 when they use `@sdf` for extra contour shading but still produce a meaningful
 full-quad fill from Pencil's empty Rectangle field. The shell exposes Shape =
 None for those experiments; required shape shaders keep their existing guarded
-picker. Shader visibility must remain independent of the SDF in both cases.
+picker. An optional shader may still declare a `defaultShapeId` when its source
+design is form-first. Shader visibility must remain independent of the SDF in
+both cases.
 
 ## Pencil contract updates (read from the live app via MCP, 2026-08-21)
 

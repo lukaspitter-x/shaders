@@ -20,33 +20,41 @@ describe('liquid-metal.glsl', () => {
       sdf: 'u_shape',
     });
     expect(experiment?.shapeOptional).toBe(true);
+    expect(experiment?.defaultShapeId).toBe('rounded-rect');
   });
 
   it('keeps the full-quad material visible when the SDF is empty', () => {
-    expect(source).toContain('gl_FragColor = vec4(col, 1.0);');
+    expect(source).toContain('gl_FragColor = vec4(color, 1.0);');
     expect(lintPencil(source).some((finding) => finding.rule === 'sdf-gated-visibility')).toBe(
       false,
     );
   });
 
-  it('exposes the reference material controls in stable sections', () => {
+  it('matches the source material controls and defaults', () => {
     const { schema, defaults } = parseShader(source);
     const sections = [...new Set(schema.map((control) => control.section).filter(Boolean))];
 
-    expect(sections).toEqual([
-      'Fluid Dynamics',
-      'Shape',
-      'Material',
-      'Iridescence',
-      'Environment',
-    ]);
+    expect(sections).toEqual(['Fluid Dynamics', 'Iridescence (Rainbow)', 'Base Material']);
     expect(defaults).toMatchObject({
-      u_scale: 3,
+      u_scale: 0.00298,
       u_shapeReactivity: 1,
-      u_metalness: 0.82,
-      u_iridescence: 0.9,
-      u_ior: 1.45,
-      u_thickness: 780,
+      u_distortion: 1.52,
+      u_edgeProtection: 1,
+      u_speed: 0,
+      u_iridescence: 0.907,
+      u_iridescenceIOR: 1,
+      u_thicknessMin: 759,
+      u_thicknessMax: 800,
+      u_roughness: 0.452,
+      u_metalness: 0.587,
+      u_clearcoat: 0.071,
     });
+  });
+
+  it('retains the source domain-warp and analytical-normal constants', () => {
+    expect(source).toContain('vec3 warpedP = p + warp * 1.5;');
+    expect(source).toContain('float eps = 0.03;');
+    expect(source).toContain('normalize(vec3(nx - n0, ny - n0, nz - n0))');
+    expect(source).toContain('smoothDist * u_shapeReactivity * 150.0 * u_scale');
   });
 });

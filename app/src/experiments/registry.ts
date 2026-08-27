@@ -31,6 +31,8 @@ export interface ShaderExperiment {
   type: 'fill' | 'effect';
   /** An `@sdf` shader that also renders meaningfully with an empty field. */
   shapeOptional?: boolean;
+  /** Initial workbench host shape; optional shaders may still expose None. */
+  defaultShapeId?: string;
   /** Raw GLSL source (imported via `?raw`), in Pencil's annotated dialect. */
   source: string;
 }
@@ -46,6 +48,7 @@ export const EXPERIMENTS: ShaderExperiment[] = [
     label: 'Liquid Metal',
     type: 'fill',
     shapeOptional: true,
+    defaultShapeId: 'rounded-rect',
     source: liquidMetalSource,
   },
   { id: 'mouse-glow', label: 'Mouse Glow', type: 'fill', source: mouseGlowSource },

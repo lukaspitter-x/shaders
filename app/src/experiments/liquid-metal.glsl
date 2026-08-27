@@ -1,16 +1,20 @@
 /**
- * Liquid Metal in Forms — a Pencil-compatible 2D interpretation of Sabo
- * Sugi's Three.js study: https://codepen.io/sabosugi/pen/yyabKEP
+ * Liquid Metal in Forms — a Pencil-compatible port of Sabo Sugi's Three.js
+ * study: https://codepen.io/sabosugi/pen/yyabKEP
  *
- * The reference's simplex domain warping, shape-aware inflation, metallic
- * environment, and iridescent thickness variation are rebuilt here as a
- * single fragment shader. The original CodePen is Copyright (c) 2026 Sabo
- * Sugi and published under the MIT License.
+ * This follows the source material injection directly: the same simplex-noise
+ * function, fixed 1.5 domain warp, 0.03 finite-difference epsilon, normalized
+ * 3D noise normal, blurred shape-mask inflation, contour flow, edge protection,
+ * physical-material defaults, and thin-film thickness range. The only replaced
+ * part is Three.js's RoomEnvironment/PBR renderer, represented here by a small
+ * neutral room-light approximation so the shader stays standalone in Pencil.
  *
- * The host SDF is deliberately optional. A populated field adds contour
- * relief and the host clips the fill to its silhouette; an empty Rectangle
- * field (or Shape = None in the workbench) renders the same liquid material
- * across the full quad. Visibility never depends on the SDF.
+ * Copyright (c) 2026 Sabo Sugi. Original CodePen published under the MIT
+ * License. Adaptation retains this notice under the same license.
+ *
+ * The SDF remains optional: a populated field supplies the form's bevel and
+ * mask reactivity, while Pencil's empty Rectangle field renders the identical
+ * material over the full quad. Visibility never depends on the SDF.
  */
 
 /** @resolution */
@@ -24,49 +28,16 @@ uniform sampler2D u_shape;
 
 // SECTION: Fluid Dynamics
 /**
- * Size of the broad liquid ripples. Lower values make larger, calmer waves.
+ * Exact spatial scale from the source material. Its local SVG coordinates are
+ * reproduced below in a 100-unit canvas.
  * @label Ripple Scale
- * @default 3
- * @range 0.25, 12
+ * @default 0.00298
+ * @range 0.0001, 0.015
  */
 uniform float u_scale;
 
 /**
- * Strength of the domain warp that folds the noise into liquid swirls.
- * @label Warp
- * @default 1.5
- * @range 0, 4
- */
-uniform float u_warp;
-
-/**
- * Strength of the ripples in the reconstructed surface normal.
- * @label Distortion
- * @default 1.5
- * @range 0, 5
- */
-uniform float u_distortion;
-
-/**
- * Drift speed of the liquid. Negative values reverse the flow.
- * @label Speed
- * @default 0.18
- * @range -2, 2
- */
-uniform float u_speed;
-
-/**
- * Screen direction the liquid drifts toward, in degrees.
- * @label Flow Angle
- * @default 90
- * @range 0, 360
- */
-uniform float u_flowAngle;
-
-// SECTION: Shape
-/**
- * How strongly a populated host SDF inflates the material along its contour.
- * Set to 0 for the same liquid surface inside every silhouette.
+ * Amount that a blurred host-shape mask offsets the noise in depth.
  * @label Shape Reactivity
  * @default 1
  * @range 0, 5
@@ -74,136 +45,87 @@ uniform float u_flowAngle;
 uniform float u_shapeReactivity;
 
 /**
- * Width of the rounded contour transition, in canvas pixels.
- * @label Contour Width
- * @default 72
- * @range 2, 240
+ * Strength of the normalized simplex-noise normal added to the base surface.
+ * @label Distortion
+ * @default 1.52
+ * @range 0, 5
  */
-uniform float u_contourWidth;
+uniform float u_distortion;
 
 /**
- * Keeps turbulent ripples away from a populated shape's outline. Has no
- * effect when the SDF is empty.
- * @label Edge Protection
- * @default 0.8
+ * Protects beveled side faces from fluid-normal distortion.
+ * @label Edge Sharpness
+ * @default 1
  * @range 0, 1
  */
 uniform float u_edgeProtection;
 
-// SECTION: Material
 /**
- * Base color of the metal.
- * @label Tint
- * @color
- * @default #eeeeee
+ * Contour-flow speed. The source initializes this to 0, producing a static
+ * material until motion is deliberately enabled.
+ * @label Speed
+ * @default 0
+ * @range -2, 2
  */
-uniform vec3 u_tint;
+uniform float u_speed;
 
+// SECTION: Iridescence (Rainbow)
 /**
- * Blend from diffuse pearlescent material to reflected metal.
- * @label Metalness
- * @default 0.82
- * @range 0, 1
- */
-uniform float u_metalness;
-
-/**
- * Softens the reflected horizon and studio bands.
- * @label Roughness
- * @default 0.28
- * @range 0, 1
- */
-uniform float u_roughness;
-
-/**
- * Strength of the tight clearcoat highlight.
- * @label Clearcoat
- * @default 0.35
- * @range 0, 1
- */
-uniform float u_clearcoat;
-
-/**
- * Overall brightness before the highlight rolloff.
- * @label Exposure
- * @default 1.15
- * @range 0.2, 3
- */
-uniform float u_exposure;
-
-// SECTION: Iridescence
-/**
- * Amount of thin-film rainbow color at glancing angles.
+ * Thin-film iridescence intensity.
  * @label Intensity
- * @default 0.9
+ * @default 0.907
  * @range 0, 1
  */
 uniform float u_iridescence;
 
 /**
- * Optical density of the thin film; higher values spread the hues farther.
+ * Thin-film index of refraction.
  * @label Index of Refraction
- * @default 1.45
+ * @default 1
  * @range 1, 3
  */
-uniform float u_ior;
+uniform float u_iridescenceIOR;
 
 /**
- * Mean thin-film thickness used to choose the reflected hue.
- * @label Thickness
- * @default 780
+ * Lower end of the iridescence thickness range.
+ * @label Thickness Min
+ * @default 759
  * @range 0, 1500
  */
-uniform float u_thickness;
+uniform float u_thicknessMin;
 
 /**
- * How much the ripple field varies thin-film thickness across the surface.
- * @label Thickness Variation
- * @default 180
- * @range 0, 800
+ * Upper end of the iridescence thickness range.
+ * @label Thickness Max
+ * @default 800
+ * @range 0, 1500
  */
-uniform float u_thicknessVariation;
+uniform float u_thicknessMax;
 
-// SECTION: Environment
+// SECTION: Base Material
 /**
- * Direction of the bright studio hemisphere and key light, in degrees.
- * @label Light Angle
- * @default 115
- * @range 0, 360
- */
-uniform float u_lightAngle;
-
-/**
- * Sharpness of the light/dark studio horizon reflected in the metal.
- * @label Horizon
- * @default 0.72
+ * Physical-material roughness.
+ * @label Roughness
+ * @default 0.452
  * @range 0, 1
  */
-uniform float u_horizon;
+uniform float u_roughness;
 
 /**
- * Number of vertical softbox reflections around the environment.
- * @label Softboxes
- * @default 3
- * @range 0, 12
+ * Physical-material metalness.
+ * @label Metalness
+ * @default 0.587
+ * @range 0, 1
  */
-uniform float u_stripes;
+uniform float u_metalness;
 
 /**
- * Width of each reflected softbox.
- * @label Softbox Width
- * @default 0.28
- * @range 0.05, 0.9
+ * Physical-material clearcoat amount.
+ * @label Clearcoat
+ * @default 0.071
+ * @range 0, 1
  */
-uniform float u_stripeWidth;
-
-/**
- * Shift between the dark ground and bright sky reflected on flat areas.
- * @label View Tilt
- * @default 0.08
- * @range -1, 1
- */
-uniform float u_tilt;
+uniform float u_clearcoat;
 
 vec4 permute(vec4 x) {
   return mod(((x * 34.0) + 1.0) * x, 289.0);
@@ -213,7 +135,7 @@ vec4 taylorInvSqrt(vec4 r) {
   return 1.79284291400159 - 0.85373472095314 * r;
 }
 
-// Ashima Arts simplex noise, as used by the reference material.
+// The reference's GLSL simplex3D function, unchanged apart from formatting.
 float snoise(vec3 v) {
   const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
   const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
@@ -265,16 +187,44 @@ float snoise(vec3 v) {
   ));
 }
 
-float studioStripe(float phase, float width, float roughness) {
-  float local = abs(fract(phase) - 0.5);
-  float halfWidth = clamp(width * 0.5, 0.025, 0.45);
-  float feather = mix(0.015, 0.16, roughness);
-  return 1.0 - smoothstep(halfWidth, min(0.499, halfWidth + feather), local);
+float softBand(float x, float center, float halfWidth, float softness) {
+  return 1.0 - smoothstep(halfWidth, halfWidth + softness, abs(x - center));
 }
 
-vec3 filmColor(float phase) {
-  vec3 wave = 0.5 + 0.5 * cos(6.2831853 * (phase + vec3(0.00, 0.33, 0.67)));
-  return mix(vec3(0.72), wave, 0.78);
+/** Neutral approximation of Three.js RoomEnvironment for a standalone fill. */
+vec3 roomEnvironment(vec3 r, float roughness) {
+  float vertical = smoothstep(-0.65, 0.75, r.y);
+  vec3 env = mix(vec3(0.16, 0.17, 0.18), vec3(0.92, 0.93, 0.94), vertical);
+
+  float wall = 1.0 - smoothstep(0.35, 0.95, abs(r.x));
+  env += vec3(0.34) * wall * smoothstep(-0.35, 0.55, r.y);
+
+  float leftPanel = softBand(r.x, -0.48, 0.16, 0.18)
+    * softBand(r.y, 0.18, 0.52, 0.2);
+  float topPanel = softBand(r.y, 0.72, 0.14, 0.2);
+  env += vec3(0.72, 0.70, 0.67) * leftPanel;
+  env += vec3(0.48) * topPanel;
+
+  float darkPanel = softBand(r.x + r.y * 0.45, 0.22, 0.22, 0.26)
+    * smoothstep(-0.45, 0.35, -r.y);
+  env *= 1.0 - darkPanel * 0.72;
+
+  return mix(env, vec3(0.72), roughness * 0.62);
+}
+
+vec3 thinFilm(float thickness, float ior) {
+  float optical = thickness * max(ior, 1.0) * 0.0125;
+  vec3 phase = optical * vec3(1.00, 1.17, 1.36);
+  return 0.72 + 0.28 * cos(phase + vec3(0.0, 2.1, 4.2));
+}
+
+vec3 acesToneMap(vec3 x) {
+  float a = 2.51;
+  float b = 0.03;
+  float c = 2.43;
+  float d = 0.59;
+  float e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 float hash21(vec2 p) {
@@ -284,97 +234,80 @@ float hash21(vec2 p) {
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
-  vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
+  vec2 localPos = (uv - 0.5) * vec2(aspect, 1.0) * 100.0;
 
-  float flowRad = radians(u_flowAngle);
-  vec2 flow = vec2(cos(flowRad), sin(flowRad)) * u_time * u_speed;
-  vec3 p = vec3((q + flow * 0.12) * u_scale, u_time * u_speed * 0.16);
+  vec4 field = texture2D(u_shape, uv);
+  float shapeDistance = max(field.r, 0.0);
+  float shaped = step(0.0001, shapeDistance);
+  float gradLength = length(field.gb);
+  vec2 shapeDirection = gradLength > 0.00001 ? field.gb / gradLength : vec2(0.0);
 
-  vec3 warp = vec3(
-    snoise(p + vec3(0.0, 0.0, u_time * 0.10)),
-    snoise(p + vec3(114.5, 22.1, u_time * 0.08)),
-    snoise(p + vec3(233.2, 51.5, -u_time * 0.07))
-  );
-  vec3 warpedP = p + warp * u_warp;
-  float eps = 0.035;
-  float fluid = snoise(warpedP);
+  // CodePen rasterizes the SVG into a 1024px mask with blur(45px). This SDF
+  // ramp is its resolution-independent equivalent inside the selected form.
+  float smoothDist = smoothstep(0.0, 45.0, shapeDistance) * shaped;
+  vec2 maskGrad = shapeDirection * (1.0 - smoothDist) * shaped;
+
+  vec3 p = vec3(localPos * u_scale, 0.0);
+  p.z += smoothDist * u_shapeReactivity * 150.0 * u_scale;
+
+  vec2 contourTangent = vec2(-maskGrad.y, maskGrad.x);
+  p.xy += contourTangent * (u_time * u_speed * 0.5);
+  p.y -= u_time * u_speed * 0.1;
+
+  vec3 warp;
+  warp.x = snoise(p + vec3(0.0, 0.0, u_time * 0.1));
+  warp.y = snoise(p + vec3(114.5, 22.1, u_time * 0.1));
+  warp.z = snoise(p + vec3(233.2, 51.5, u_time * 0.1));
+  vec3 warpedP = p + warp * 1.5;
+
+  float eps = 0.03;
+  float n0 = snoise(warpedP);
   float nx = snoise(warpedP + vec3(eps, 0.0, 0.0));
   float ny = snoise(warpedP + vec3(0.0, eps, 0.0));
-  vec2 fluidGrad = vec2(nx - fluid, ny - fluid) / eps;
+  float nz = snoise(warpedP + vec3(0.0, 0.0, eps));
+  vec3 noiseNormal = normalize(vec3(nx - n0, ny - n0, nz - n0));
 
-  // An empty @sdf (plain Rectangle / no host shape) contributes no contour,
-  // while the liquid normal remains fully active across the canvas.
-  vec4 field = texture2D(u_shape, uv);
-  float d = max(field.r, 0.0);
-  float shaped = step(0.0001, d);
-  vec2 shapeGrad = field.gb;
-  float shapeGradLen = length(shapeGrad);
-  vec2 shapeDir = shapeGradLen > 0.00001 ? shapeGrad / shapeGradLen : vec2(0.0);
-  float contourWidth = max(u_contourWidth, 1.0);
-  float edgeDepth = exp(-d / contourWidth) * shaped;
-  float protectedNoise = mix(
-    1.0,
-    smoothstep(0.0, contourWidth, d),
-    u_edgeProtection * shaped
-  );
+  // Reconstruct the fixed extruded/beveled base geometry that Three.js supplies
+  // before the source adds its fluid normal. Empty SDFs use a flat face.
+  float bevelT = clamp(shapeDistance / 30.0, 0.0, 1.0);
+  float bevelSlope = shaped * (1.0 - bevelT) * 2.4;
+  vec3 originalNormal = normalize(vec3(-shapeDirection * bevelSlope, 1.0));
 
-  vec2 heightGrad = fluidGrad * u_distortion * 0.32 * protectedNoise;
-  heightGrad += shapeDir * edgeDepth * u_shapeReactivity * 1.8;
-  vec3 n = normalize(vec3(-heightGrad, 1.0));
+  float isFlatFace = smoothstep(0.1, 0.9, abs(originalNormal.z));
+  float edgeMask = mix(1.0, isFlatFace, u_edgeProtection);
+  vec3 normal = normalize(originalNormal + noiseNormal * u_distortion * edgeMask);
 
-  vec3 view = normalize(vec3(-q * 0.28, 1.0));
-  vec3 refl = 2.0 * dot(n, view) * n - view;
+  vec3 view = vec3(0.0, 0.0, 1.0);
+  vec3 reflected = 2.0 * dot(normal, view) * normal - view;
+  float roughness = clamp(u_roughness, 0.0, 1.0);
+  vec3 env = roomEnvironment(reflected, roughness);
 
-  float lightRad = radians(u_lightAngle - 90.0);
-  float lc = cos(lightRad);
-  float ls = sin(lightRad);
-  vec2 reflectedUp = vec2(
-    lc * refl.x + ls * refl.y,
-    -ls * refl.x + lc * refl.y
-  );
-  float elev = reflectedUp.y + u_tilt;
-  float azim = atan(reflectedUp.x, refl.z + 0.0001);
+  vec3 baseColor = vec3(0.9333333);
+  float diffuseLight = 0.42
+    + 0.58 * max(dot(normal, normalize(vec3(0.45, 0.72, 0.9))), 0.0);
+  vec3 diffuse = baseColor * diffuseLight;
+  vec3 color = mix(diffuse, baseColor * env, u_metalness);
 
-  float rough = clamp(u_roughness, 0.0, 1.0);
-  float horizonSoft = max(mix(0.48, 0.035, u_horizon), rough * 0.35);
-  float horizon = smoothstep(-horizonSoft, horizonSoft, elev);
-  float ground = mix(0.035, 0.24, clamp(-elev, 0.0, 1.0));
-  float sky = mix(0.96, 0.52, clamp(elev, 0.0, 1.0));
-  float env = mix(ground, sky, horizon);
+  float fresnel = pow(1.0 - clamp(dot(normal, view), 0.0, 1.0), 5.0);
+  float fluidNoise = n0 + smoothDist * u_shapeReactivity * 2.0;
+  float thicknessMix = clamp(fluidNoise * 0.5 + 0.5, 0.0, 1.0);
+  float thickness = mix(u_thicknessMin, u_thicknessMax, thicknessMix);
+  vec3 film = thinFilm(thickness, u_iridescenceIOR);
+  float filmAmount = u_iridescence * (0.025 + fresnel * 0.28);
+  color = mix(color, color * film, filmAmount);
 
-  float stripePhase = azim * max(u_stripes, 0.0) * 0.15915494;
-  float stripeOn = step(0.001, u_stripes);
-  float stripe = studioStripe(stripePhase, u_stripeWidth, rough);
-  env += stripe * stripeOn * horizon * mix(0.75, 0.28, rough);
-  env = mix(env, 0.48, rough * 0.55);
+  vec3 key = normalize(vec3(0.42, 0.72, 0.78));
+  vec3 halfVector = normalize(key + view);
+  float specPower = mix(180.0, 12.0, roughness);
+  float specular = pow(max(dot(normal, halfVector), 0.0), specPower);
+  color += vec3(specular * (0.18 + u_clearcoat * 0.82));
+  color += vec3(fresnel * u_clearcoat * 0.24);
 
-  float fresnel = pow(1.0 - clamp(dot(n, view), 0.0, 1.0), 3.0);
-  float filmPhase = u_thickness * 0.0017
-    + fluid * u_thicknessVariation * 0.0025
-    + fresnel * (u_ior - 1.0) * 1.8;
-  vec3 iri = filmColor(filmPhase);
-  float iriAmount = u_iridescence * clamp(0.18 + fresnel * 1.15, 0.0, 1.0);
+  // CodePen: ACESFilmicToneMapping with exposure 1.3 and material dithering.
+  color = acesToneMap(max(color, 0.0) * 1.3);
+  color += (hash21(gl_FragCoord.xy) - 0.5) * 0.004;
+  color = clamp(color, 0.0, 1.0);
 
-  vec3 diffuse = u_tint * (0.32 + 0.5 * max(n.z, 0.0));
-  vec3 metal = u_tint * env;
-  vec3 col = mix(diffuse, metal, u_metalness);
-  col = mix(col, col * iri * 1.35, iriAmount);
-
-  vec3 lightDir = normalize(vec3(cos(radians(u_lightAngle)), sin(radians(u_lightAngle)), 0.8));
-  vec3 halfDir = normalize(lightDir + view);
-  float glossPower = mix(110.0, 10.0, rough);
-  float clearcoat = pow(max(dot(n, halfDir), 0.0), glossPower) * u_clearcoat;
-  col += vec3(clearcoat);
-  col += u_tint * fresnel * 0.18;
-  col *= u_exposure;
-
-  // Filmic shoulder and subtle dithering keep the broad chrome gradients clean.
-  vec3 hi = max(col - 0.72, 0.0);
-  col = min(col, vec3(0.72)) + hi / (1.0 + 1.8 * hi);
-  col += (hash21(gl_FragCoord.xy) - 0.5) * 0.006;
-  col = clamp(col, 0.0, 1.0);
-
-  // Always opaque here. The host clips populated shapes; an empty SDF remains
-  // a valid full-quad liquid material instead of disappearing.
-  gl_FragColor = vec4(col, 1.0);
+  // The host performs silhouette clipping. Empty SDFs remain full-quad.
+  gl_FragColor = vec4(color, 1.0);
 }
