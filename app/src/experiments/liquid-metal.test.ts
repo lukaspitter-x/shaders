@@ -81,7 +81,8 @@ describe('liquid-metal.glsl', () => {
   });
 
   it('sharpens linear transitions independently of stripe density', () => {
-    expect(source).toContain('float gain = mix(1.0, 16.0, amount);');
+    expect(source).toContain('float gain = 1.0 + 15.0 * sharpnessAmount;');
+    expect(source).toContain('clamp(-2.0 * gain * boundedWave, -80.0, 80.0)');
     expect(source).toContain('return sharpenLinearWave(wave, sharpness);');
     expect(source).toContain('u_linearDensity,');
     expect(source).toContain('u_stripeSharpness');

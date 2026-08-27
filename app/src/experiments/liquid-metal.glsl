@@ -100,7 +100,7 @@ uniform float u_linearDensity;
  * this after lowering Linear Density to retain crisp metallic boundaries.
  * @label Stripe Sharpness
  * @default 0
- * @range 0, 1
+ * @range 0, 3
  */
 uniform float u_stripeSharpness;
 
@@ -319,12 +319,14 @@ float hash21(vec2 p) {
 }
 
 float sharpenLinearWave(float wave, float sharpness) {
-  float amount = clamp(sharpness, 0.0, 1.0);
-  float gain = mix(1.0, 16.0, amount);
+  float sharpnessAmount = max(sharpness, 0.0);
+  float blendAmount = clamp(sharpnessAmount, 0.0, 1.0);
+  float gain = 1.0 + 15.0 * sharpnessAmount;
   float boundedWave = clamp(wave, -1.0, 1.0);
-  float sigmoid = 2.0 / (1.0 + exp(-2.0 * gain * boundedWave)) - 1.0;
+  float sigmoidExponent = clamp(-2.0 * gain * boundedWave, -80.0, 80.0);
+  float sigmoid = 2.0 / (1.0 + exp(sigmoidExponent)) - 1.0;
   float normalization = 2.0 / (1.0 + exp(-2.0 * gain)) - 1.0;
-  return mix(wave, sigmoid / max(normalization, 0.0001), amount);
+  return mix(wave, sigmoid / max(normalization, 0.0001), blendAmount);
 }
 
 float linearField(vec3 p, vec2 direction, float density, float time, float sharpness) {
