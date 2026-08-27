@@ -41,6 +41,10 @@ describe('liquid-metal.glsl', () => {
       u_distortion: 1.52,
       u_edgeProtection: 1,
       u_speed: 0,
+      u_twistSpeed: 1,
+      u_linearMix: 0,
+      u_linearDirection: 0,
+      u_linearDensity: 1,
       u_iridescence: 0.907,
       u_iridescenceIOR: 1,
       u_thicknessMin: 759,
@@ -56,5 +60,12 @@ describe('liquid-metal.glsl', () => {
     expect(source).toContain('float eps = 0.03;');
     expect(source).toContain('normalize(vec3(nx - n0, ny - n0, nz - n0))');
     expect(source).toContain('smoothDist * u_shapeReactivity * 150.0 * u_scale');
+  });
+
+  it('separates twist animation from contour flow and preserves ripple by default', () => {
+    expect(source).toContain('float twistTime = u_time * u_twistSpeed;');
+    expect(source).toContain('p.xy += contourTangent * (u_time * u_speed * 0.5);');
+    expect(source).toContain('vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);');
+    expect(source).toContain('float patternNoise = mix(n0, l0, linearMix);');
   });
 });

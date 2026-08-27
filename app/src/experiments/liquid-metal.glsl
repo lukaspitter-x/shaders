@@ -69,6 +69,40 @@ uniform float u_edgeProtection;
  */
 uniform float u_speed;
 
+/**
+ * Speed of the evolving domain warp. This is independent of Speed, which only
+ * moves the material along the form's contours. Set to 0 to freeze the twist.
+ * @label Twist Speed
+ * @default 1
+ * @range 0, 3
+ */
+uniform float u_twistSpeed;
+
+/**
+ * Blends the source's simplex ripple field into directional sine/cosine bands.
+ * 0 preserves the original ripple; 1 is fully linear.
+ * @label Linear Mix
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_linearMix;
+
+/**
+ * Direction of change for the linear pattern, in degrees.
+ * @label Linear Direction
+ * @default 0
+ * @range 0, 360
+ */
+uniform float u_linearDirection;
+
+/**
+ * Number of directional sine/cosine bands across the material.
+ * @label Linear Density
+ * @default 1
+ * @range 0.25, 6
+ */
+uniform float u_linearDensity;
+
 // SECTION: Iridescence (Rainbow)
 /**
  * Thin-film iridescence intensity.
@@ -231,6 +265,11 @@ float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+float linearField(vec3 p, vec2 direction, float density, float time) {
+  float phase = dot(p.xy, direction) * 18.0 * density + p.z * 6.0 - time * 0.8;
+  return sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   float aspect = u_resolution.x / u_resolution.y;
@@ -254,10 +293,11 @@ void main() {
   p.xy += contourTangent * (u_time * u_speed * 0.5);
   p.y -= u_time * u_speed * 0.1;
 
+  float twistTime = u_time * u_twistSpeed;
   vec3 warp;
-  warp.x = snoise(p + vec3(0.0, 0.0, u_time * 0.1));
-  warp.y = snoise(p + vec3(114.5, 22.1, u_time * 0.1));
-  warp.z = snoise(p + vec3(233.2, 51.5, u_time * 0.1));
+  warp.x = snoise(p + vec3(0.0, 0.0, twistTime * 0.1));
+  warp.y = snoise(p + vec3(114.5, 22.1, twistTime * 0.1));
+  warp.z = snoise(p + vec3(233.2, 51.5, twistTime * 0.1));
   vec3 warpedP = p + warp * 1.5;
 
   float eps = 0.03;
@@ -265,7 +305,18 @@ void main() {
   float nx = snoise(warpedP + vec3(eps, 0.0, 0.0));
   float ny = snoise(warpedP + vec3(0.0, eps, 0.0));
   float nz = snoise(warpedP + vec3(0.0, 0.0, eps));
-  vec3 noiseNormal = normalize(vec3(nx - n0, ny - n0, nz - n0));
+  vec3 rippleNormal = normalize(vec3(nx - n0, ny - n0, nz - n0));
+
+  float linearAngle = radians(u_linearDirection);
+  vec2 linearDirection = vec2(cos(linearAngle), sin(linearAngle));
+  float l0 = linearField(p, linearDirection, u_linearDensity, twistTime);
+  float lx = linearField(p + vec3(eps, 0.0, 0.0), linearDirection, u_linearDensity, twistTime);
+  float ly = linearField(p + vec3(0.0, eps, 0.0), linearDirection, u_linearDensity, twistTime);
+  vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
+  vec3 linearNormal = normalize(vec3(linearGradient * 0.15, 1.0));
+
+  float linearMix = clamp(u_linearMix, 0.0, 1.0);
+  vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);
 
   // Reconstruct the fixed extruded/beveled base geometry that Three.js supplies
   // before the source adds its fluid normal. Empty SDFs use a flat face.
@@ -289,7 +340,8 @@ void main() {
   vec3 color = mix(diffuse, baseColor * env, u_metalness);
 
   float fresnel = pow(1.0 - clamp(dot(normal, view), 0.0, 1.0), 5.0);
-  float fluidNoise = n0 + smoothDist * u_shapeReactivity * 2.0;
+  float patternNoise = mix(n0, l0, linearMix);
+  float fluidNoise = patternNoise + smoothDist * u_shapeReactivity * 2.0;
   float thicknessMix = clamp(fluidNoise * 0.5 + 0.5, 0.0, 1.0);
   float thickness = mix(u_thicknessMin, u_thicknessMax, thicknessMix);
   vec3 film = thinFilm(thickness, u_iridescenceIOR);
