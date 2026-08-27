@@ -71,7 +71,7 @@ uniform float u_speed;
 uniform float u_twistSpeed;
 
 /**
- * Blends the source's simplex ripple field into directional sine/cosine bands.
+ * Blends the source's simplex ripple field into regular directional bands.
  * 0 preserves the original ripple; 1 is fully linear.
  * @label Linear Mix
  * @default 0
@@ -88,7 +88,18 @@ uniform float u_linearMix;
 uniform float u_linearDirection;
 
 /**
- * Number of directional sine/cosine bands across the material.
+ * Uses density-based spacing or locks the frame to exactly one, two, or three
+ * complete stripes. Exact-count modes remain stationary so a stripe cannot
+ * wrap at the frame edge and briefly appear as two separate fragments.
+ * @label Stripe Count
+ * @select Density, One, Two, Three
+ * @default 0
+ */
+uniform float u_stripeCount;
+
+/**
+ * Number of directional bands across the material when Stripe Count is set to
+ * Density.
  * @label Linear Density
  * @default 1
  * @range 0.25, 6
@@ -98,7 +109,7 @@ uniform float u_linearDensity;
 /**
  * Independent spatial scale for the linear bands. At 0 the stripes follow
  * Ripple Scale for backward compatibility; positive values decouple them.
- * Lower values produce wider stripes.
+ * Lower values create fewer, larger periods in Density mode.
  * @label Stripe Scale
  * @default 0
  * @range 0, 0.015
@@ -106,17 +117,26 @@ uniform float u_linearDensity;
 uniform float u_linearScale;
 
 /**
- * Expands each linear band into the gap without changing the stripe count.
- * 0.5 preserves the current equal-width waveform.
+ * Relative width of the visible metal stripe. Stripe Width and Stripe Gap are
+ * normalized into one period, so adjacent stripes can never overlap.
  * @label Stripe Width
+ * @default 0.5
+ * @range 0.05, 0.95
+ */
+uniform float u_linearBandWidth;
+
+/**
+ * Relative empty space between neighboring stripes. Increase this to open the
+ * gaps or decrease it to let Stripe Width occupy more of each period.
+ * @label Stripe Gap
  * @default 0.5
  * @range 0.05, 0.95
  */
 uniform float u_linearStripeWidth;
 
 /**
- * Compresses each sine/cosine transition without adding more stripes. Raise
- * this after lowering Linear Density to retain crisp metallic boundaries.
+ * Compresses each stripe-edge transition without changing its width, gap, or
+ * count. Raise this after lowering Linear Density to retain crisp boundaries.
  * @label Stripe Sharpness
  * @default 0
  * @range 0, 3
@@ -337,29 +357,18 @@ float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
-float sharpenLinearWave(float wave, float sharpness) {
-  float sharpnessAmount = max(sharpness, 0.0);
-  float blendAmount = clamp(sharpnessAmount, 0.0, 1.0);
-  float gain = 1.0 + 15.0 * sharpnessAmount;
-  float boundedWave = clamp(wave, -1.0, 1.0);
-  float sigmoidExponent = clamp(-2.0 * gain * boundedWave, -80.0, 80.0);
-  float sigmoid = 2.0 / (1.0 + exp(sigmoidExponent)) - 1.0;
-  float normalization = 2.0 / (1.0 + exp(-2.0 * gain)) - 1.0;
-  return mix(wave, sigmoid / max(normalization, 0.0001), blendAmount);
-}
-
-float linearField(
-  vec3 p,
-  vec2 direction,
-  float density,
-  float time,
-  float stripeWidth,
+float stripeBandProfile(
+  float cycleCoordinate,
+  float stripeFraction,
   float sharpness
 ) {
-  float phase = dot(p.xy, direction) * 18.0 * density + p.z * 6.0 - time * 0.8;
-  float wave = sin(phase) * 0.75 + cos(phase * 0.5 + 0.7) * 0.25;
-  wave += (clamp(stripeWidth, 0.05, 0.95) - 0.5) * 1.5;
-  return sharpenLinearWave(wave, sharpness);
+  // One centered stripe owns a bounded part of every period. Both transition
+  // limits stay inside that part, which prevents overlaps and broken repeats.
+  float distanceFromCenter = abs(fract(cycleCoordinate) - 0.5);
+  float halfStripe = clamp(stripeFraction * 0.5, 0.025, 0.475);
+  float softEdge = halfStripe * mix(0.9, 0.015, clamp(sharpness / 3.0, 0.0, 1.0));
+  float flatEdge = max(halfStripe - softEdge, 0.0);
+  return 1.0 - smoothstep(flatEdge, halfStripe, distanceFromCenter);
 }
 
 void main() {
@@ -380,15 +389,11 @@ void main() {
 
   float stripeScale = u_linearScale > 0.000001 ? u_linearScale : u_scale;
   vec3 p = vec3(localPos * u_scale, 0.0);
-  vec3 linearP = vec3(localPos * stripeScale, 0.0);
   p.z += smoothDist * u_shapeReactivity * 150.0 * u_scale;
-  linearP.z += smoothDist * u_shapeReactivity * 150.0 * stripeScale;
 
   vec2 contourTangent = vec2(-maskGrad.y, maskGrad.x);
   p.xy += contourTangent * (u_time * u_speed * 0.5);
-  linearP.xy += contourTangent * (u_time * u_speed * 0.5);
   p.y -= u_time * u_speed * 0.1;
-  linearP.y -= u_time * u_speed * 0.1;
 
   float twistTime = u_time * u_twistSpeed;
   vec3 warp;
@@ -406,32 +411,49 @@ void main() {
 
   float linearAngle = radians(u_linearDirection);
   vec2 linearDirection = vec2(cos(linearAngle), sin(linearAngle));
-  float l0 = linearField(
-    linearP,
-    linearDirection,
-    u_linearDensity,
-    twistTime,
-    u_linearStripeWidth,
+  float projectionExtent = max(
+    abs(linearDirection.x) * aspect + abs(linearDirection.y),
+    0.0001
+  );
+  float normalizedProjection = dot(
+    (uv - 0.5) * vec2(aspect, 1.0),
+    linearDirection
+  ) / projectionExtent + 0.5;
+
+  const float TAU = 6.28318530718;
+  float densityCycle = dot(localPos * stripeScale, linearDirection)
+    * 18.0 * u_linearDensity / TAU - twistTime * 0.8 / TAU;
+  float exactCount = max(floor(u_stripeCount + 0.5), 1.0);
+  float exactCycle = normalizedProjection * exactCount;
+  float stripeCycle = u_stripeCount < 0.5 ? densityCycle : exactCycle;
+
+  // Width and gap are relative weights within a single immutable period. Their
+  // normalized fraction always remains below one, even at opposite extremes.
+  float stripeWeight = clamp(u_linearBandWidth, 0.05, 0.95);
+  float gapWeight = clamp(u_linearStripeWidth, 0.05, 0.95);
+  float stripeFraction = stripeWeight / (stripeWeight + gapWeight);
+  float l0 = stripeBandProfile(stripeCycle, stripeFraction, u_stripeSharpness);
+
+  // A symmetric profile sample produces a stable surface normal. Sampling the
+  // same periodic function cannot introduce extra frequencies or overlaps.
+  float profileStep = 0.001;
+  float profileBefore = stripeBandProfile(
+    stripeCycle - profileStep,
+    stripeFraction,
     u_stripeSharpness
   );
-  float lx = linearField(
-    linearP + vec3(eps, 0.0, 0.0),
-    linearDirection,
-    u_linearDensity,
-    twistTime,
-    u_linearStripeWidth,
+  float profileAfter = stripeBandProfile(
+    stripeCycle + profileStep,
+    stripeFraction,
     u_stripeSharpness
   );
-  float ly = linearField(
-    linearP + vec3(0.0, eps, 0.0),
-    linearDirection,
-    u_linearDensity,
-    twistTime,
-    u_linearStripeWidth,
-    u_stripeSharpness
+  float stripeSlope = clamp(
+    (profileAfter - profileBefore) / (2.0 * profileStep),
+    -40.0,
+    40.0
   );
-  vec2 linearGradient = vec2(lx - l0, ly - l0) / eps;
-  vec3 linearNormal = normalize(vec3(linearGradient * 0.15, 1.0));
+  vec3 linearNormal = normalize(vec3(linearDirection * stripeSlope * 0.08, 1.0));
+  l0 = l0 * 2.0 - 1.0;
 
   float linearMix = clamp(u_linearMix, 0.0, 1.0);
   vec3 noiseNormal = mix(rippleNormal, linearNormal, linearMix);

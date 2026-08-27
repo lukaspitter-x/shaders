@@ -53,8 +53,10 @@ describe('liquid-metal.glsl', () => {
       u_twistSpeed: 1,
       u_linearMix: 0,
       u_linearDirection: 0,
+      u_stripeCount: '0',
       u_linearDensity: 1,
       u_linearScale: 0,
+      u_linearBandWidth: 0.5,
       u_linearStripeWidth: 0.5,
       u_stripeSharpness: 0,
       u_iridescence: 0.907,
@@ -82,23 +84,58 @@ describe('liquid-metal.glsl', () => {
     expect(source).toContain('float patternNoise = mix(n0, l0, linearMix);');
   });
 
-  it('sharpens linear transitions independently of stripe density', () => {
-    expect(source).toContain('float gain = 1.0 + 15.0 * sharpnessAmount;');
-    expect(source).toContain('clamp(-2.0 * gain * boundedWave, -80.0, 80.0)');
-    expect(source).toContain('return sharpenLinearWave(wave, sharpness);');
-    expect(source).toContain('u_linearDensity,');
-    expect(source).toContain('u_stripeSharpness');
+  it('offers density spacing plus exact one, two, and three stripe modes', () => {
+    const { schema } = parseShader(source);
+    const count = schema.find((control) => control.key === 'u_stripeCount');
+
+    expect(count).toMatchObject({
+      kind: 'select',
+      label: 'Stripe Count',
+      options: [
+        { label: 'Density', value: '0' },
+        { label: 'One', value: '1' },
+        { label: 'Two', value: '2' },
+        { label: 'Three', value: '3' },
+      ],
+    });
+    expect(source).toContain('float exactCount = max(floor(u_stripeCount + 0.5), 1.0);');
+    expect(source).toContain('float exactCycle = normalizedProjection * exactCount;');
+    expect(source).toContain('u_stripeCount < 0.5 ? densityCycle : exactCycle');
   });
 
-  it('widens linear stripes independently of their density and sharpness', () => {
-    expect(source).toContain('(clamp(stripeWidth, 0.05, 0.95) - 0.5) * 1.5');
-    expect(source).toContain('u_linearStripeWidth,');
+  it('keeps stripe width and gap regular, complementary, and non-overlapping', () => {
+    expect(source).toContain('float stripeWeight = clamp(u_linearBandWidth, 0.05, 0.95);');
+    expect(source).toContain('float gapWeight = clamp(u_linearStripeWidth, 0.05, 0.95);');
+    expect(source).toContain('stripeWeight / (stripeWeight + gapWeight)');
+    expect(source).toContain('abs(fract(cycleCoordinate) - 0.5)');
+    expect(source).toContain('clamp(stripeFraction * 0.5, 0.025, 0.475)');
+
+    for (const count of [1, 2, 3]) {
+      for (const width of [0.05, 0.5, 0.95]) {
+        for (const gap of [0.05, 0.5, 0.95]) {
+          const stripeFraction = width / (width + gap);
+          const stripeWidth = stripeFraction / count;
+          const gapWidth = (1 - stripeFraction) / count;
+
+          expect(stripeWidth).toBeGreaterThan(0);
+          expect(gapWidth).toBeGreaterThan(0);
+          expect((stripeWidth + gapWidth) * count).toBeCloseTo(1, 12);
+        }
+      }
+    }
+  });
+
+  it('sharpens only the bounded stripe edge without changing its period', () => {
+    expect(source).toContain("halfStripe * mix(0.9, 0.015, clamp(sharpness / 3.0, 0.0, 1.0))");
+    expect(source).toContain('smoothstep(flatEdge, halfStripe, distanceFromCenter)');
+    expect(source).toContain('stripeBandProfile(stripeCycle, stripeFraction, u_stripeSharpness)');
+    expect(source).toContain('u_linearDensity / TAU');
   });
 
   it('can decouple stripe scale from ripple scale without changing old presets', () => {
     expect(source).toContain('u_linearScale > 0.000001 ? u_linearScale : u_scale');
-    expect(source).toContain('vec3 linearP = vec3(localPos * stripeScale, 0.0);');
-    expect(source).toContain('linearP.z += smoothDist * u_shapeReactivity * 150.0 * stripeScale;');
+    expect(source).toContain('dot(localPos * stripeScale, linearDirection)');
+    expect(source).not.toContain('smoothDist * u_shapeReactivity * 150.0 * stripeScale');
   });
 
   it('can amplify thin-film color without changing the thickness phase', () => {
