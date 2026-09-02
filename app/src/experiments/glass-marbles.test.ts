@@ -205,6 +205,8 @@ describe('glass-marbles.glsl', () => {
     // the single search recomputes each ball as it tests it.
     expect(source).not.toMatch(/vec4\s+balls\[/);
     expect(source).toContain('vec4 b = ballAt(fi, t, bigRadius, tilt);');
+    // Second half of the search only when Count exceeds 16.
+    expect(source).toContain('if (u_count > float(HALF_BALLS)) {');
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);

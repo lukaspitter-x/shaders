@@ -230,9 +230,9 @@ uniform float u_envRotation;
 // SECTION: Focus
 /**
  * Shallow depth of field: balls away from the focus plane swell and soften
- * like bokeh.
+ * like bokeh. 0 keeps every ball sharp.
  * @label Depth Of Field
- * @default 0.35
+ * @default 0
  * @range 0, 1
  */
 uniform float u_bokeh;
@@ -250,7 +250,7 @@ uniform float u_focus;
  * Extra blur for balls behind the focus plane, deeper in the sphere. 1
  * blurs them like the balls in front; higher smears the back wall away.
  * @label Back Blur
- * @default 1.6
+ * @default 1
  * @range 0, 4
  */
 uniform float u_backBlur;
@@ -559,6 +559,10 @@ uniform float u_bgBrightness;
 // the whole shader runs four times slower; with one search pass, recomputing
 // is as fast as storing at 16 and scales to 32.
 const int MAX_BALLS = 32;
+// The search runs as two loops of 16: the second only when Count exceeds 16,
+// behind one uniform branch, so a small flock does not pay for 32 bodies
+// (a per-iteration count test inside one 32-loop gets predicated instead).
+const int HALF_BALLS = 16;
 // Particles live on P_LAYERS depth layers, each cut into P_SECTORS angular
 // sectors holding P_PER_SECTOR particle slots. A pixel only evaluates the
 // sectors around its own angle, and within a sector only the slots whose
@@ -1311,7 +1315,7 @@ void main() {
   near.t = 1e9;
   near.index = -1.0;
   near.ball = vec4(0.0);
-  for (int i = 0; i < MAX_BALLS; i++) {
+  for (int i = 0; i < HALF_BALLS; i++) {
     float fi = float(i);
     if (fi < u_count) {
       vec4 b = ballAt(fi, t, bigRadius, tilt);
@@ -1320,6 +1324,20 @@ void main() {
         near.t = th;
         near.index = fi;
         near.ball = b;
+      }
+    }
+  }
+  if (u_count > float(HALF_BALLS)) {
+    for (int i = HALF_BALLS; i < MAX_BALLS; i++) {
+      float fi = float(i);
+      if (fi < u_count) {
+        vec4 b = ballAt(fi, t, bigRadius, tilt);
+        float th = sphereHit(roG, rdG, b.xyz, b.w);
+        if (th > 0.0 && th < near.t) {
+          near.t = th;
+          near.index = fi;
+          near.ball = b;
+        }
       }
     }
   }
