@@ -79,6 +79,7 @@ describe('glass-marbles.glsl', () => {
       'u_bob',
       'u_turbulence',
       'u_spread',
+      'u_tumble',
       'u_tilt',
     ]);
   });
@@ -195,11 +196,15 @@ describe('glass-marbles.glsl', () => {
     expect(count?.kind).toBe('slider');
     if (count?.kind === 'slider') {
       expect(count.min).toBe(1);
-      expect(count.max).toBe(16);
+      expect(count.max).toBe(32);
       expect(count.step).toBe(1);
     }
     // The shader loop is sized to the slider's ceiling.
-    expect(source).toContain('const int MAX_BALLS = 16;');
+    expect(source).toContain('const int MAX_BALLS = 32;');
+    // No stored ball array (a >16 array falls out of registers on Metal):
+    // the single search recomputes each ball as it tests it.
+    expect(source).not.toMatch(/vec4\s+balls\[/);
+    expect(source).toContain('vec4 b = ballAt(fi, t, bigRadius, tilt);');
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
@@ -218,11 +223,19 @@ describe('glass-marbles.glsl ball slots', () => {
   );
   const slots = Number(source.match(/const float RING_SLOTS = ([\d.]+);/)?.[1]);
 
-  it('declares six rings and a slot count', () => {
-    expect(rings).toHaveLength(6);
-    expect(slots).toBe(5);
-    // 3 axis slots + 3 rings x 5 slots must cover the ball ceiling.
-    expect(3 + 3 * slots).toBeGreaterThanOrEqual(16);
+  it('declares enough ring slots for the ball ceiling', () => {
+    const axis = rings.filter(([rho]) => rho === 0).length;
+    const orbit = rings.length - axis;
+    expect(axis).toBe(3);
+    expect(slots).toBe(6);
+    expect(axis + orbit * slots).toBeGreaterThanOrEqual(32);
+  });
+
+  it('keeps the ring speed variation bounded (no runaway spin)', () => {
+    // The angle integrates rate * (1 + 0.4 sin), so speed oscillates but
+    // never grows with elapsed time.
+    expect(source).toContain('float breathe = t - (0.4 / w) * cos(w * t + ringSeed * TAU);');
+    expect(source).not.toMatch(/t \* rate \* \(1\.0 \+ wobble\)/);
   });
 
   it('keeps every ring envelope inside the unit flock sphere', () => {

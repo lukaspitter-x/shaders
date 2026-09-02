@@ -260,7 +260,7 @@ uniform float u_backBlur;
  * Number of small balls inside the sphere.
  * @label Count
  * @default 14
- * @range 1, 16
+ * @range 1, 32
  * @step 1
  */
 uniform float u_count;
@@ -272,7 +272,7 @@ uniform float u_count;
  * ball fills its slot and has no room left to move; the three balls on the
  * axis are kept a little smaller so they can drift.
  * @label Ball Size
- * @default 0.65
+ * @default 0.75
  * @range 0.2, 1
  */
 uniform float u_ballSize;
@@ -344,6 +344,16 @@ uniform float u_turbulence;
  * @range 0.1, 1
  */
 uniform float u_spread;
+
+/**
+ * Slow nod and precession of the whole flock, so every ball keeps moving,
+ * including the three on the axis. A rigid rotation: balls still never
+ * touch.
+ * @label Tumble
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_tumble;
 
 /**
  * Tilt of the whirl axis toward the viewer, degrees.
@@ -544,7 +554,11 @@ uniform float u_bgBrightness;
 // 16 is a hard ceiling from the Metal compiler: the ball loops are fully
 // unrolled up to 16 iterations and keep the ball array in registers; at 17
 // the array falls into memory and the whole shader runs four times slower.
-const int MAX_BALLS = 16;
+// No ball array: the single search recomputes each ball as it tests it. A
+// stored array of more than 16 balls falls out of registers on Metal and
+// the whole shader runs four times slower; with one search pass, recomputing
+// is as fast as storing at 16 and scales to 32.
+const int MAX_BALLS = 32;
 // Particles live on P_LAYERS depth layers, each cut into P_SECTORS angular
 // sectors holding P_PER_SECTOR particle slots. A pixel only evaluates the
 // sectors around its own angle, and within a sector only the slots whose
@@ -720,11 +734,24 @@ float backgroundHue() {
 
 // ---------------------------------------------------------------- scene ---
 
-mat3 tiltMatrix() {
-  float a = radians(u_tilt);
+mat3 rotX(float a) {
   float c = cos(a);
-  float s = sin(a);
-  return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c);
+  float sn = sin(a);
+  return mat3(1.0, 0.0, 0.0, 0.0, c, sn, 0.0, -sn, c);
+}
+
+mat3 rotY(float a) {
+  float c = cos(a);
+  float sn = sin(a);
+  return mat3(c, 0.0, -sn, 0.0, 1.0, 0.0, sn, 0.0, c);
+}
+
+// Orientation of the whole flock: the tilt, plus a slow nod and precession
+// under Tumble. Rigid, so the slot envelopes stay disjoint.
+mat3 orientation(float t) {
+  float nod = u_tumble * 0.6 * sin(t * 0.23);
+  float precess = u_tumble * 0.18 * t;
+  return rotY(precess) * rotX(radians(u_tilt) + nod);
 }
 
 // Ball slots. Each ring is (distance from the whirl axis, height, room) in
@@ -735,13 +762,15 @@ mat3 tiltMatrix() {
 // points of the two rings from below), neighbouring slots on a ring are at
 // least 2 * room apart, and every ring stays inside the unit sphere. The
 // test file checks these numbers, so keep them in this form.
-const vec3 RING_CENTER = vec3(0.0, 0.0, 0.22);
-const vec3 RING_TOP = vec3(0.0, 0.62, 0.2);
-const vec3 RING_BOTTOM = vec3(0.0, -0.62, 0.2);
-const vec3 RING_UPPER = vec3(0.5, 0.35, 0.24);
-const vec3 RING_LOWER = vec3(0.5, -0.35, 0.24);
-const vec3 RING_OUTER = vec3(0.78, 0.0, 0.19);
-const float RING_SLOTS = 5.0;
+const vec3 RING_CENTER = vec3(0.0, 0.0, 0.18);
+const vec3 RING_TOP = vec3(0.0, 0.66, 0.16);
+const vec3 RING_BOTTOM = vec3(0.0, -0.66, 0.16);
+const vec3 RING_UPPER = vec3(0.42, 0.38, 0.17);
+const vec3 RING_LOWER = vec3(0.42, -0.38, 0.17);
+const vec3 RING_EQUATOR = vec3(0.45, 0.0, 0.19);
+const vec3 RING_OUTER_UPPER = vec3(0.76, 0.2, 0.15);
+const vec3 RING_OUTER_LOWER = vec3(0.76, -0.2, 0.15);
+const float RING_SLOTS = 6.0;
 
 // Slot for ball i: xyz = ring (distance, height, room), w = slot angle index.
 // Order: the three axis balls first, then the rings interleaved, so the Count
@@ -757,15 +786,21 @@ vec4 ballSlot(float fi) {
     return vec4(RING_BOTTOM, 0.0);
   }
   float j = fi - 3.0;
-  float ring = mod(j, 3.0);
-  float k = floor(j / 3.0);
+  float ring = mod(j, 5.0);
+  float k = floor(j / 5.0);
   if (ring < 0.5) {
-    return vec4(RING_UPPER, k);
+    return vec4(RING_EQUATOR, k);
   }
   if (ring < 1.5) {
+    return vec4(RING_UPPER, k);
+  }
+  if (ring < 2.5) {
+    return vec4(RING_OUTER_UPPER, k);
+  }
+  if (ring < 3.5) {
     return vec4(RING_LOWER, k);
   }
-  return vec4(RING_OUTER, k);
+  return vec4(RING_OUTER_LOWER, k);
 }
 
 // Circle of confusion (world units) for a ball centred at depth z.
@@ -796,8 +831,12 @@ vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   // speeds up and slows down on its own slow rhythm.
   float ringSeed = hash(vec2(rho * 13.0 + slot.y * 7.0, u_layoutSeed * 0.53 + 2.0));
   float rate = u_swirl * mix(1.0, 1.6 - rho, u_vortex) * (slot.y < 0.0 ? 0.8 : 1.0);
-  float wobble = 0.4 * sin(t * (0.12 + 0.18 * ringSeed) + ringSeed * TAU);
-  float ang = ringSeed * TAU + slot.w * TAU / RING_SLOTS + t * rate * (1.0 + wobble);
+  // The breathing is a bounded speed variation: the angle is the integral
+  // of rate * (1 + 0.4 sin(w t + phase)), never a factor on t itself (that
+  // would make the flock spin faster and faster).
+  float w = 0.12 + 0.18 * ringSeed;
+  float breathe = t - (0.4 / w) * cos(w * t + ringSeed * TAU);
+  float ang = ringSeed * TAU + slot.w * TAU / RING_SLOTS + rate * breathe;
   vec3 pos = vec3(rho * cos(ang), slot.y, rho * sin(ang));
 
   // Balls on the axis have no ring to ride, so leave them more room to drift.
@@ -807,7 +846,9 @@ vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   // Wander inside the slot, never further than the room left around the
   // ball: a slow three-axis drift with random rhythms per ball, a faster
   // jitter, and the bob on top.
-  vec3 drift = sin(t * (vec3(0.25, 0.2, 0.3) + vec3(0.4, 0.35, 0.4) * h.xyz) + g.xyz * TAU);
+  // Axis balls have no orbit, so their drift runs at twice the tempo.
+  float tempo = rho < 0.01 ? 2.0 : 1.0;
+  vec3 drift = sin(t * tempo * (vec3(0.25, 0.2, 0.3) + vec3(0.4, 0.35, 0.4) * h.xyz) + g.xyz * TAU);
   vec3 jitter = 0.35 * sin(t * (vec3(1.4, 1.1, 1.6) + vec3(1.2, 1.3, 0.9) * g.yzw) + h.yzx * TAU);
   vec3 wander = u_turbulence * (drift + jitter);
   wander.y += u_bob * sin(t * (0.6 + g.w) + h.z * TAU);
@@ -832,34 +873,15 @@ float sphereHit(vec3 ro, vec3 rd, vec3 c, float r) {
   return th > 0.0 ? th : -1.0;
 }
 
-// Result of a ball lookup. index is -1 when nothing was hit.
+// Result of the ball search. index is -1 when nothing was hit; the ball is
+// copied out because ES 1.00 fragment shaders cannot index by a computed
+// value (and there is no array to index anyway).
 struct Hit {
   float t;
   float index;
   vec4 ball;
 };
 
-// Nearest small ball along the ray. Balls are precomputed once per pixel so
-// this loop is only sphere tests, and the hit ball is copied out here because
-// ES 1.00 fragment shaders cannot index an array with a computed value.
-Hit nearestBall(vec4 balls[MAX_BALLS], vec3 ro, vec3 rd, float skip) {
-  Hit h;
-  h.t = 1e9;
-  h.index = -1.0;
-  h.ball = vec4(0.0);
-  for (int i = 0; i < MAX_BALLS; i++) {
-    float fi = float(i);
-    if (fi < u_count && fi != skip) {
-      float th = sphereHit(ro, rd, balls[i].xyz, balls[i].w);
-      if (th > 0.0 && th < h.t) {
-        h.t = th;
-        h.index = fi;
-        h.ball = balls[i];
-      }
-    }
-  }
-  return h;
-}
 
 vec3 lightDir() {
   float a = radians(u_lightAngle);
@@ -1011,22 +1033,15 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
 }
 
 
-// A ball seen through another ball: no further lookups behind it.
-vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float bigRadius,
-    vec3 bgHi, vec3 bgLo, float detail) {
-  Lens l = lensThrough(ro, rd, b, th, 1.0 - 0.7 * softness(b, bigRadius));
-  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
-  return ballSurface(ro, rd, l, b, bigRadius, col, behind, bgLo, 0.6);
-}
 
-// One colour channel's view into the sphere. The near and far balls were
-// found once with the green ray; here the channel's own (differently bent)
-// ray is intersected against just those two, which is what smears the ball
-// edges into colour fringes while keeping the search loops out of the
-// per-channel work. A channel ray that slips past the ball sees the
-// background, as it would past the ball's rim.
+// One colour channel's view into the sphere. The nearest ball was found
+// once with the green ray; here the channel's own (differently bent) ray is
+// intersected against just that ball, which is what smears the ball edges
+// into colour fringes while keeping the search loops out of the per-channel
+// work. A channel ray that slips past the ball sees the background, as it
+// would past the ball's rim.
 vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo,
-    float detail, Hit near, vec3 nearCol, Hit far, vec3 farCol) {
+    float detail, Hit near, vec3 nearCol) {
   vec3 rdIn = refract(rd, n1, 1.0 / ior);
   if (dot(rdIn, rdIn) < 0.5) {
     rdIn = rd;
@@ -1040,13 +1055,7 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
     return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo, detail);
   }
   Lens l = lensThrough(ro, rdIn, near.ball, th, 1.0 - 0.7 * softness(near.ball, bigRadius));
-  vec3 behind;
-  float thFar = far.index < 0.0 ? -1.0 : sphereHit(l.e, l.rdOut, far.ball.xyz, far.ball.w);
-  if (thFar > 0.0) {
-    behind = shadeBallFar(far.ball, farCol, l.e, l.rdOut, thFar, ior, bigRadius, bgHi, bgLo, detail);
-  } else {
-    behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
-  }
+  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
   return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
 }
 
@@ -1222,6 +1231,17 @@ vec3 particleCover(vec3 p1, vec3 n1, vec3 rd, float ior, float spread, float t, 
   return cover;
 }
 
+// A traced ball: its radius grown by the circle of confusion, or a dead
+// entry past the Count dial.
+vec4 ballAt(float fi, float t, float bigRadius, mat3 tilt) {
+  if (fi >= u_count) {
+    return vec4(0.0, 0.0, 0.0, -1.0);
+  }
+  vec4 b = ball(fi, t, bigRadius, tilt);
+  b.w += defocus(b.z, bigRadius);
+  return b;
+}
+
 void main() {
   vec2 res = u_resolution;
   float shortSide = min(res.x, res.y);
@@ -1271,17 +1291,7 @@ void main() {
   }
 
   // Lay out the balls once; the three channel traces share them.
-  vec4 balls[MAX_BALLS];
-  mat3 tilt = tiltMatrix();
-  for (int i = 0; i < MAX_BALLS; i++) {
-    vec4 b = vec4(0.0, 0.0, 0.0, -1.0);
-    if (float(i) < u_count) {
-      b = ball(float(i), t, bigRadius, tilt);
-      b.w += defocus(b.z, bigRadius);
-    }
-    balls[i] = b;
-  }
-
+  mat3 tilt = orientation(t);
   float ior = 1.0 + u_refraction * 0.6;
   float spread = u_aberration * 0.08 * (0.4 + u_refraction);
 
@@ -1290,32 +1300,35 @@ void main() {
   float rimMask = mix(1.0, pow(1.0 - facing, 2.5), u_reflectionFalloff);
   float detail = u_studioDetail * rimMask;
 
-  // Find the nearest ball, and the ball behind it through its lens, once.
+  // Find the nearest ball once with the green ray, recomputing each ball
+  // in the loop (see MAX_BALLS).
   vec3 rdG = refract(rd, n1, 1.0 / ior);
   if (dot(rdG, rdG) < 0.5) {
     rdG = rd;
   }
   vec3 roG = p1 + rdG * 1e-4;
-  Hit near = nearestBall(balls, roG, rdG, -1.0);
-  Hit far;
-  far.index = -1.0;
-  far.t = 1e9;
-  far.ball = vec4(0.0);
-  vec3 nearCol = vec3(0.0);
-  vec3 farCol = vec3(0.0);
-  if (near.index >= 0.0) {
-    nearCol = ballColor(near.index);
-    Lens lg = lensThrough(roG, rdG, near.ball, near.t, 1.0 - 0.7 * softness(near.ball, bigRadius));
-    far = nearestBall(balls, lg.e, lg.rdOut, near.index);
-    if (far.index >= 0.0) {
-      farCol = ballColor(far.index);
+  Hit near;
+  near.t = 1e9;
+  near.index = -1.0;
+  near.ball = vec4(0.0);
+  for (int i = 0; i < MAX_BALLS; i++) {
+    float fi = float(i);
+    if (fi < u_count) {
+      vec4 b = ballAt(fi, t, bigRadius, tilt);
+      float th = sphereHit(roG, rdG, b.xyz, b.w);
+      if (th > 0.0 && th < near.t) {
+        near.t = th;
+        near.index = fi;
+        near.ball = b;
+      }
     }
   }
+  vec3 nearCol = near.index >= 0.0 ? ballColor(near.index) : vec3(0.0);
 
   vec3 interior = vec3(
-      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).r,
-      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).g,
-      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).b);
+      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol).r,
+      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol).g,
+      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol).b);
 
   if (u_particleCount > 0.5) {
     float tMax = near.index >= 0.0 ? near.t : 1e9;
