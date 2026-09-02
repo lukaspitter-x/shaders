@@ -59,11 +59,7 @@ import {
   useTabState,
   writeUiState,
 } from '@/lib/local-storage';
-import {
-  bakeDefaults,
-  downgradePencilDirectives,
-  stripHiddenAnnotations,
-} from '@/glsl/strip-annotations';
+import { preparePencilExport } from '@/glsl/strip-annotations';
 import { usePresets } from '@/presets/use-presets';
 import { PresetSwitcher } from '@/presets/preset-switcher';
 import { EXPERIMENTS } from '@/experiments/registry';
@@ -154,15 +150,11 @@ export default function App() {
 
   const selected = EXPERIMENTS.find((e) => e.id === selectedId);
   const parsed = useMemo(() => (selected ? parseShader(selected.source) : null), [selected]);
-  // Lint what Pencil will actually receive — the export path downgrades
-  // workbench-only directives (@select/@switch/@step) to paste-safe @range.
-  const lint = useMemo(
-    () => (selected ? lintPencil(downgradePencilDirectives(selected.source)) : []),
-    [selected],
-  );
   const requiresShape = !!parsed?.system.sdf && !selected?.shapeOptional;
 
   const [previewScale, setPreviewScale] = useLocalStorage<PreviewScale>('previewScale', 'full');
+  // Render DPR cap: 2 is sharp, 1 renders a quarter of the pixels (heavy shaders).
+  const [previewDpr, setPreviewDpr] = useLocalStorage<1 | 2>('previewDpr', 2);
   const hasGrid = parsed?.schema.some((c) => c.key === 'u_gridSize') ?? false;
 
   // Presets hook — replaces the old useState<ShaderValues> + localStorage persistence.
@@ -177,6 +169,18 @@ export default function App() {
     defaultPresetShape,
   );
 
+  // Lint the exact preset-baked source Pencil will receive. Workbench-only
+  // envelope textures are converted to plain GLSL before compatibility checks.
+  const lint = useMemo(
+    () =>
+      selected
+        ? lintPencil(
+            preparePencilExport(selected.source, presetStore.pencilKeys, presetStore.values),
+          )
+        : [],
+    [selected, presetStore.pencilKeys, presetStore.values],
+  );
+
   const savedShapeId = presetStore.shape.id;
   const shapeId = isUsableShapeId(savedShapeId, shapes)
     ? savedShapeId
@@ -185,7 +189,9 @@ export default function App() {
       : 'none';
   const selectedShape: ShapeDef | null =
     shapeId === 'none' ? null : (shapes.find((s) => s.id === shapeId) ?? null);
-  const shapeScale = presetStore.shape.size;
+  // Full frame is the viewport itself, not a resizable silhouette. Ignore
+  // legacy preset sizes so it always reaches all four canvas edges.
+  const shapeScale = selectedShape?.scalable === false ? 1 : presetStore.shape.size;
 
   const selectShape = (id: string) => {
     presetStore.setShape({ id, size: shapeScale });
@@ -260,7 +266,7 @@ export default function App() {
               onDelete={onDeleteShape}
               requiresShape={requiresShape}
             />
-            {selectedShape && (
+            {selectedShape && selectedShape.scalable !== false && (
               <SliderControl
                 label="Size"
                 value={shapeScale}
@@ -439,14 +445,11 @@ export default function App() {
   });
 
   // Export path: bake current values into @default so the tuned look (e.g. a
-  // material preset) pastes into Pencil intact, then inline hidden uniforms.
+  // material preset) pastes into Pencil intact, bake unsupported envelope
+  // controls into plain GLSL, then inline hidden uniforms.
   const exportGlsl = () =>
     selected
-      ? stripHiddenAnnotations(
-          bakeDefaults(selected.source, presetStore.values),
-          presetStore.pencilKeys,
-          presetStore.values,
-        )
+      ? preparePencilExport(selected.source, presetStore.pencilKeys, presetStore.values)
       : '';
 
   const [copied, setCopied] = useState(false);
@@ -665,6 +668,7 @@ export default function App() {
                   shapeExpand={shapeExpand}
                   lint={viewMode === 'fill' ? lint : []}
                   previewScale={hasGrid ? previewScale : 'full'}
+                  maxDpr={previewDpr}
                 />
               </ErrorBoundary>
             </div>
@@ -696,6 +700,30 @@ export default function App() {
               header={
                 <div className="flex flex-col gap-3">
                   <PresetSwitcher store={presetStore} />
+                  <div className="flex flex-col gap-2">
+                    <span className="heading">Render</span>
+                    <div className="flex gap-1">
+                      {([
+                        { value: 2, label: 'Sharp' },
+                        { value: 1, label: 'Fast' },
+                      ] as { value: 1 | 2; label: string }[]).map((s) => (
+                        <button
+                          key={s.value}
+                          type="button"
+                          title={s.value === 1 ? 'Render at 1x device pixels (4x fewer pixels)' : 'Render at native device pixels'}
+                          onClick={() => setPreviewDpr(s.value)}
+                          className={cn(
+                            'flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                            previewDpr === s.value
+                              ? 'bg-accent text-accent-foreground'
+                              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                          )}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   {hasGrid && (
                     <div className="flex flex-col gap-2">
                       <span className="heading">Preview</span>

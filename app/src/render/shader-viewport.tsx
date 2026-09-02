@@ -25,6 +25,7 @@ export function ShaderViewport({
   shapeExpand = 0,
   lint,
   previewScale = 'full',
+  maxDpr = 2,
 }: {
   parsed: ParsedShader;
   fragSource: string;
@@ -39,6 +40,8 @@ export function ShaderViewport({
   lint: LintFinding[];
   /** Grid preview scale: 'full' = native resolution, 1–4 = one cell = N pixels. */
   previewScale?: 'full' | 1 | 2 | 3 | 4;
+  /** Cap on the render device-pixel ratio: 2 = sharp, 1 = a quarter of the pixels. */
+  maxDpr?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const displayRef = useRef<HTMLCanvasElement>(null);
@@ -52,6 +55,8 @@ export function ShaderViewport({
   const timeRef = useRef(0);
   const mouseRef = useRef<[number, number]>([0, 0]);
   const previewScaleRef = useRef(previewScale);
+  const maxDprRef = useRef(maxDpr);
+  const containerRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const [error, setError] = useState<string | null>(null);
 
   // Keep the loop's view of settings/shape current without re-running effects.
@@ -60,6 +65,7 @@ export function ShaderViewport({
   shapeScaleRef.current = shapeScale;
   shapeExpandRef.current = shapeExpand;
   previewScaleRef.current = previewScale;
+  maxDprRef.current = maxDpr;
 
   /** Compute the backing resolution. In scale mode, render square at full res. */
   const resolveSize = (): { w: number; h: number } => {
@@ -79,7 +85,7 @@ export function ShaderViewport({
     }
     const ctx = displayCtxRef.current;
     if (!ctx) return;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(maxDprRef.current, window.devicePixelRatio || 1);
     const gridN = Math.floor(Number(valuesRef.current.u_gridSize) || 20);
     const scale = previewScaleRef.current as number;
     const backingSize = Math.round(gridN * scale * dpr);
@@ -141,7 +147,7 @@ export function ShaderViewport({
       const base = def;
       def = { ...base, sample: (px2, py2) => base.sample(px2 / fit, py2 / fit) * fit };
     }
-    if (!def.custom && shapeScaleRef.current !== 1) {
+    if (!def.custom && def.scalable !== false && shapeScaleRef.current !== 1) {
       const userScale = Math.min(2, Math.max(0.25, shapeScaleRef.current || 1));
       const base = def;
       def = {
@@ -166,7 +172,8 @@ export function ShaderViewport({
     // Track the container size in device pixels (capped DPR for perf).
     const ro = new ResizeObserver((entries) => {
       const cr = entries[0].contentRect;
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      containerRef.current = { w: cr.width, h: cr.height };
+      const dpr = Math.min(maxDprRef.current, window.devicePixelRatio || 1);
       sizeRef.current = {
         w: Math.max(1, Math.round(cr.width * dpr)),
         h: Math.max(1, Math.round(cr.height * dpr)),
@@ -179,7 +186,7 @@ export function ShaderViewport({
     // Track cursor in gl_FragCoord space (origin bottom-left, device pixels).
     const onPointerMove = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(maxDprRef.current, window.devicePixelRatio || 1);
       mouseRef.current = [
         (e.clientX - rect.left) * dpr,
         (rect.bottom - e.clientY) * dpr,
@@ -245,6 +252,17 @@ export function ShaderViewport({
     if (!running) drawFrame();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values]);
+
+  // Re-size the backing store when the DPR cap changes.
+  useEffect(() => {
+    const { w, h } = containerRef.current;
+    if (w <= 0 || h <= 0) return;
+    const dpr = Math.min(maxDpr, window.devicePixelRatio || 1);
+    sizeRef.current = { w: Math.max(1, Math.round(w * dpr)), h: Math.max(1, Math.round(h * dpr)) };
+    regenerateSdf();
+    drawFrame();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxDpr]);
 
   // Redraw when the preview scale changes; reset display context on mode switch.
   useEffect(() => {

@@ -746,14 +746,13 @@ float harmonySlots() {
   return 1.0;
 }
 
-vec3 ballColor(float fi) {
+vec3 ballColor(float fi, vec3 key) {
   vec2 seed = vec2(fi * 3.17 + 11.0, u_colorSeed * 1.73 + 5.0);
   float hSlot = hash(seed);
   float hJit = hash(seed + 17.0);
   float hLum = hash(seed + 29.0);
   float hChr = hash(seed + 43.0);
 
-  vec3 key = keyLch();
   float fan = mix(10.0, 60.0, u_hueSpread);
   float slot = floor(hSlot * harmonySlots());
   float hue = key.z + harmonyOffset(slot, fan) + (hJit - 0.5) * fan * 0.5;
@@ -763,8 +762,8 @@ vec3 ballColor(float fi) {
   return oklchFast(clamp(l, 0.05, 0.98), max(c, 0.0), hue);
 }
 
-float backgroundHue() {
-  float keyHue = keyLch().z;
+float backgroundHue(vec3 key) {
+  float keyHue = key.z;
   if (u_bgHueMode < 0.5) {
     return keyHue;
   }
@@ -862,7 +861,7 @@ float softness(vec4 b, float bigRadius) {
 // Small ball i at time t: xyz = centre (world units), w = radius.
 vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   vec4 h = hash4(vec2(fi * 7.31 + 3.0, u_layoutSeed * 2.11 + 1.0));
-  vec4 g = hash4(vec2(fi * 3.77 + 9.0, u_layoutSeed * 1.37 + 4.0));
+  vec4 g = fract(h.wzyx * 7.31 + h.yxwz * 3.17 + 0.37);
 
   vec4 slot = ballSlot(fi);
   float rho = slot.x;
@@ -892,7 +891,8 @@ vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   // Axis balls have no orbit, so their drift runs at twice the tempo.
   float tempo = rho < 0.01 ? 2.0 : 1.0;
   vec3 drift = sin(t * tempo * (vec3(0.25, 0.2, 0.3) + vec3(0.4, 0.35, 0.4) * h.xyz) + g.xyz * TAU);
-  vec3 jitter = 0.35 * sin(t * (vec3(1.4, 1.1, 1.6) + vec3(1.2, 1.3, 0.9) * g.yzw) + h.yzx * TAU);
+  // A faster wobble for free: cos(2x) = 1 - 2 sin^2(x) of the drift phases.
+  vec3 jitter = 0.35 * (1.0 - 2.0 * drift * drift);
   vec3 wander = u_turbulence * (drift + jitter);
   wander.y += u_bob * sin(t * (0.6 + g.w) + h.z * TAU);
   wander /= max(1.0, length(wander));
@@ -1115,6 +1115,38 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
     behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
   }
   return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
+}
+
+// A cheap channel: red and blue reuse the green ray's fully shaded ball
+// colour, but keep their own (differently bent) edge coverage and their
+// own view of the background past it. The colour fringes live at the ball
+// edges and in the background, which is where the eye sees them; shading
+// the ball's interior three times cost a third of the frame for a fringe
+// nobody could see.
+float channelCover(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, Hit near) {
+  vec3 rdIn = refract(rd, n1, 1.0 / ior);
+  if (dot(rdIn, rdIn) < 0.5) {
+    rdIn = rd;
+  }
+  vec3 ro = p1 + rdIn * 1e-4;
+  vec3 oc = ro - near.ball.xyz;
+  float along = dot(oc, rdIn);
+  if (along > 0.0) {
+    return 0.0;
+  }
+  float dist = sqrt(max(dot(oc, oc) - along * along, 0.0));
+  float blur = max(defocus(near.ball.z, bigRadius), 1e-4);
+  float trueR = near.ball.w - blur;
+  return 1.0 - smoothstep(trueR - blur, trueR + blur, dist);
+}
+
+vec3 channelBackground(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo,
+    float detail) {
+  vec3 rdIn = refract(rd, n1, 1.0 / ior);
+  if (dot(rdIn, rdIn) < 0.5) {
+    rdIn = rd;
+  }
+  return exitEnv(p1 + rdIn * 1e-4, rdIn, ior, bigRadius, bgHi, bgLo, detail);
 }
 
 // Inverse of the flight ease: which age has travelled the fraction `e` of a
@@ -1363,7 +1395,8 @@ void main() {
   }
 
   // Palette for the inside of the sphere.
-  float bgHue = backgroundHue();
+  vec3 key = keyLch();
+  float bgHue = backgroundHue(key);
   float bgL = mix(0.25, 0.97, u_bgBrightness);
   float bgC = u_bgTint * 0.11;
   vec3 bgHi = oklch(bgL, bgC, bgHue);
@@ -1425,15 +1458,29 @@ void main() {
     // so the compiler cannot hoist and merge the recomputed balls.
     far = searchBalls(balls, lg.e, lg.rdOut, near.index, t + min(near.t, 0.0), bigRadius, tilt);
     if (far.index >= 0.0) {
-      farCol = ballColor(far.index);
+      farCol = ballColor(far.index, key);
     }
   }
-  vec3 nearCol = near.index >= 0.0 ? ballColor(near.index) : vec3(0.0);
+  vec3 nearCol = near.index >= 0.0 ? ballColor(near.index, key) : vec3(0.0);
 
-  vec3 interior = vec3(
-      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).r,
-      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).g,
-      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).b);
+  vec3 interior = traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol);
+  if (spread > 0.0001) {
+    vec3 bgR = channelBackground(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail);
+    vec3 bgB = channelBackground(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail);
+    if (near.index >= 0.0) {
+      float coverR = channelCover(p1, n1, rd, ior - spread, bigRadius, near);
+      float coverB = channelCover(p1, n1, rd, ior + spread, bigRadius, near);
+      // Inside the green ball the red/blue see the same shaded ball;
+      // where their rays slip past its edge they see their background.
+      float coverG = channelCover(p1, n1, rd, ior, bigRadius, near);
+      vec3 ballOnly = coverG > 0.001 ? interior : nearCol;
+      interior.r = mix(bgR.r, ballOnly.r, coverR);
+      interior.b = mix(bgB.b, ballOnly.b, coverB);
+    } else {
+      interior.r = bgR.r;
+      interior.b = bgB.b;
+    }
+  }
 
   if (u_particleCount > 0.5) {
     float tMax = near.index >= 0.0 ? near.t : 1e9;

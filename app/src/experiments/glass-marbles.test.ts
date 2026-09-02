@@ -216,6 +216,8 @@ describe('glass-marbles.glsl', () => {
     // Balls refract each other: the ball behind the nearest is found through its lens.
     expect(source).toContain('far = searchBalls(balls, lg.e, lg.rdOut, near.index, t + min(near.t, 0.0), bigRadius, tilt);');
     expect(source).toContain('vec3 shadeBallFar(');
+    // Aberration: red/blue reuse the green-shaded ball with their own edge coverage.
+    expect(source).toContain('float channelCover(');
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
