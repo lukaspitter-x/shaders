@@ -343,6 +343,100 @@ uniform float u_spread;
  */
 uniform float u_tilt;
 
+// SECTION: Particles
+/**
+ * Number of particles emitted from the centre of the sphere. 0 turns the
+ * emitter off.
+ * @label Particle Count
+ * @default 16
+ * @range 0, 32
+ * @step 1
+ */
+uniform float u_particleCount;
+
+/**
+ * Colour of the particles. White glows on a dark sphere, a dark tone reads
+ * on a light one.
+ * @label Particle Colour
+ * @color
+ * @default #ffffff
+ */
+uniform vec3 u_particleColor;
+
+/**
+ * Opacity of a particle at full life.
+ * @label Particle Opacity
+ * @default 0.9
+ * @range 0, 1
+ */
+uniform float u_particleOpacity;
+
+/**
+ * Radius of a particle relative to the sphere.
+ * @label Particle Size
+ * @default 0.025
+ * @range 0.004, 0.12
+ */
+uniform float u_particleSize;
+
+/**
+ * How much particle sizes differ from each other.
+ * @label Particle Size Variation
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_particleSizeVar;
+
+/**
+ * How far a particle travels over its life, in sphere radii. 1 reaches the
+ * glass just as it dies; more and it stops at the glass and fades there.
+ * @label Particle Reach
+ * @default 1
+ * @range 0, 2
+ */
+uniform float u_particleReach;
+
+/**
+ * Random per-particle variation of speed.
+ * @label Particle Speed Variation
+ * @default 0.4
+ * @range 0, 1
+ */
+uniform float u_particleSpeedVar;
+
+/**
+ * Seconds from birth at the centre to death.
+ * @label Particle Lifetime
+ * @default 3
+ * @range 0.5, 12
+ */
+uniform float u_particleLife;
+
+/**
+ * Fraction of the life over which a particle fades out at the end.
+ * @label Particle Fade
+ * @default 0.5
+ * @range 0.05, 1
+ */
+uniform float u_particleFade;
+
+/**
+ * Edge softness of each particle: 0 is a hard dot, 1 a soft glow.
+ * @label Particle Softness
+ * @default 0.6
+ * @range 0, 1
+ */
+uniform float u_particleSoftness;
+
+/**
+ * Ease-out of the flight: 0 flies at a constant speed, 1 shoots out fast
+ * and slows toward the end.
+ * @label Particle Slowdown
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_particleSlowdown;
+
 // SECTION: Palette
 /**
  * Colour-theory scheme the ball colours are drawn from.
@@ -432,6 +526,7 @@ uniform float u_bgBrightness;
 // unrolled up to 16 iterations and keep the ball array in registers; at 17
 // the array falls into memory and the whole shader runs four times slower.
 const int MAX_BALLS = 16;
+const int MAX_PARTICLES = 32;
 const float TAU = 6.28318530718;
 const float CAMERA_DIST = 5.0;
 
@@ -922,6 +1017,79 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
   return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
 }
 
+// Particle i at time t: xyz = centre, w = radius; -1 radius when dead.
+vec4 particle(float fi, float t, float bigRadius) {
+  vec4 h = hash4(vec2(fi * 5.13 + 17.0, u_layoutSeed * 1.91 + 8.0));
+  float life = max(u_particleLife, 0.05);
+  float age = mod(t + h.w * life * 4.0, life) / life;
+
+  // Random direction: a normalised random vector (cheaper than trig, and the
+  // slight cube bias is invisible).
+  vec3 dir = normalize(vec3(h.x, h.y, fract(h.x * 5.7 + h.w * 2.3)) * 2.0 - 1.0 + vec3(1e-4));
+
+  float speed = u_particleReach * (1.0 + (h.z - 0.5) * 2.0 * u_particleSpeedVar);
+  // Ease-out without pow(): blend linear flight with a quadratic slowdown.
+  float eased = mix(age, age * (2.0 - age), u_particleSlowdown);
+  float travel = eased * speed * bigRadius;
+  float sizeJitter = fract(h.x * 7.3 + h.z * 3.1);
+  float radius = u_particleSize * bigRadius * mix(1.0, mix(0.4, 1.4, sizeJitter), u_particleSizeVar);
+  travel = min(travel, bigRadius * 0.985 - radius);
+
+  float fadeIn = smoothstep(0.0, 0.08, age);
+  float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);
+  float alive = fadeIn * fadeOut;
+  return vec4(dir * travel, alive > 0.001 ? radius * (0.6 + 0.4 * alive) : -1.0);
+}
+
+// Soft-disc coverage of one particle along one ray, hidden past tMax.
+float particleHit(vec3 ro, vec3 rd, vec4 pt, float tMax, float bigRadius) {
+  vec3 oc = pt.xyz - ro;
+  float along = dot(oc, rd);
+  if (along < 0.0 || along > tMax) {
+    return 0.0;
+  }
+  float blur = defocus(pt.z, bigRadius);
+  float r = pt.w + blur;
+  float dist2 = dot(oc, oc) - along * along;
+  float k = clamp(1.0 - dist2 / (r * r), 0.0, 1.0);
+  float edge = mix(smoothstep(0.0, 0.25, k), k * k, u_particleSoftness);
+  return edge * (pt.w * pt.w) / (r * r);
+}
+
+// Per-channel particle coverage for the three refracted rays, so particles
+// near the glass pick up the same colour fringes as everything else.
+vec3 particleCover(vec3 p1, vec3 n1, vec3 rd, float ior, float spread, float t, float bigRadius,
+    float tMax) {
+  vec3 rdR = refract(rd, n1, 1.0 / (ior - spread));
+  vec3 rdG = refract(rd, n1, 1.0 / ior);
+  vec3 rdB = refract(rd, n1, 1.0 / (ior + spread));
+  if (dot(rdG, rdG) < 0.5) {
+    rdR = rd;
+    rdG = rd;
+    rdB = rd;
+  }
+  vec3 cover = vec3(0.0);
+  for (int i = 0; i < MAX_PARTICLES; i++) {
+    float fi = float(i);
+    if (fi < u_particleCount) {
+      vec4 pt = particle(fi, t, bigRadius);
+      // Broad phase on the green ray: most particles are nowhere near this
+      // pixel, so skip the three precise tests unless one is close.
+      vec3 oc = pt.xyz - p1;
+      float along = dot(oc, rdG);
+      float broad = pt.w * 4.0 + defocus(pt.z, bigRadius);
+      if (pt.w > 0.0 && dot(oc, oc) - along * along < broad * broad) {
+        vec3 a = vec3(
+            particleHit(p1, rdR, pt, tMax, bigRadius),
+            particleHit(p1, rdG, pt, tMax, bigRadius),
+            particleHit(p1, rdB, pt, tMax, bigRadius));
+        cover = cover + a - cover * a;
+      }
+    }
+  }
+  return cover;
+}
+
 void main() {
   vec2 res = u_resolution;
   float shortSide = min(res.x, res.y);
@@ -1012,6 +1180,12 @@ void main() {
       traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).r,
       traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).g,
       traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).b);
+
+  if (u_particleCount > 0.5) {
+    float tMax = near.index >= 0.0 ? near.t : 1e9;
+    vec3 pa = particleCover(p1, n1, rd, ior, spread, t, bigRadius, tMax) * u_particleOpacity;
+    interior = mix(interior, toLinear(u_particleColor), pa);
+  }
 
   float f0 = (ior - 1.0) / (ior + 1.0);
   f0 *= f0;

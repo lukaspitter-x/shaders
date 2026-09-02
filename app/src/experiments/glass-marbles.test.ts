@@ -28,7 +28,7 @@ describe('glass-marbles.glsl', () => {
     expect(nearBody.slice(0, nearBody.indexOf('\n}\n'))).not.toMatch(/\{[\s\S]*traceChannel\(/);
     // Every loop bound is a compile-time constant.
     for (const m of source.matchAll(/for\s*\([^;]*;\s*\w+\s*<\s*(\w+)/g)) {
-      expect(m[1]).toMatch(/^(\d+|MAX_BALLS)$/);
+      expect(m[1]).toMatch(/^(\d+|MAX_BALLS|MAX_PARTICLES)$/);
     }
   });
 
@@ -49,6 +49,7 @@ describe('glass-marbles.glsl', () => {
       'Focus',
       'Balls',
       'Motion',
+      'Particles',
       'Palette',
     ]);
     expect(sections.get('Glass')).toEqual([
@@ -97,6 +98,20 @@ describe('glass-marbles.glsl', () => {
     const idx = source.indexOf('color = mix(color, u_backdropColor, backdrop * u_backdropOpacity);');
     expect(idx).toBeGreaterThan(source.indexOf('color = toGamma(color);'));
     expect(idx).toBeLessThan(source.indexOf('gl_FragColor = vec4(mix(u_outside'));
+  });
+
+  it('emits particles from the centre that die and stop at the glass', () => {
+    const { schema } = parseShader(source);
+    const count = schema.find((c) => c.key === 'u_particleCount');
+    expect(count?.section).toBe('Particles');
+    if (count?.kind === 'slider') expect(count.max).toBe(32);
+    expect(source).toContain('const int MAX_PARTICLES = 32;');
+    // Born at the centre, straight flight, clamped inside the glass.
+    expect(source).toContain('travel = min(travel, bigRadius * 0.985 - radius);');
+    // Fade in, fade out over the last Particle Fade of the life.
+    expect(source).toContain('float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);');
+    // Hidden behind the nearest ball.
+    expect(source).toContain('float tMax = near.index >= 0.0 ? near.t : 1e9;');
   });
 
   it('exposes an equirectangular environment map with bundled presets', () => {
@@ -159,7 +174,7 @@ describe('glass-marbles.glsl', () => {
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
-    expect(colors).toEqual(['u_outside', 'u_backdropColor', 'u_keyColor']);
+    expect(colors).toEqual(['u_outside', 'u_backdropColor', 'u_particleColor', 'u_keyColor']);
     expect(defaults.u_keyColor).toBe('#ea5a78');
     expect(schema.find((c) => c.key === 'u_baseHue')).toBeUndefined();
   });
