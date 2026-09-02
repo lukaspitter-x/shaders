@@ -76,6 +76,9 @@ describe('glass-marbles.glsl', () => {
     const { schema, defaults } = parseShader(source);
     expect(schema.find((c) => c.key === 'u_bokeh')?.section).toBe('Focus');
     expect(schema.find((c) => c.key === 'u_focus')?.section).toBe('Focus');
+    expect(schema.find((c) => c.key === 'u_backBlur')?.section).toBe('Focus');
+    // Behind the focus plane the circle of confusion is scaled by Back Blur.
+    expect(source).toContain('float amount = d < 0.0 ? -d * u_backBlur : d;');
     expect(defaults.u_focus).toBe(0.5);
     expect(source).toContain('b.w += defocus(b.z, bigRadius);');
     expect(source).toContain('float cover = 1.0 - smoothstep(trueR - blur, trueR + blur, dist);');

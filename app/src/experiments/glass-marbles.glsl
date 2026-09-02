@@ -192,6 +192,15 @@ uniform float u_bokeh;
  */
 uniform float u_focus;
 
+/**
+ * Extra blur for balls behind the focus plane, deeper in the sphere. 1
+ * blurs them like the balls in front; higher smears the back wall away.
+ * @label Back Blur
+ * @default 1.6
+ * @range 0, 4
+ */
+uniform float u_backBlur;
+
 // SECTION: Balls
 /**
  * Number of small balls inside the sphere.
@@ -596,7 +605,15 @@ vec4 ballSlot(float fi) {
 
 // Circle of confusion (world units) for a ball centred at depth z.
 float defocus(float z, float bigRadius) {
-  return u_bokeh * 0.18 * abs(z - u_focus * bigRadius);
+  float d = z - u_focus * bigRadius;
+  float amount = d < 0.0 ? -d * u_backBlur : d;
+  return u_bokeh * 0.18 * amount;
+}
+
+// How far out of focus a traced ball is, 0 sharp .. 1 a soft disc.
+float softness(vec4 b, float bigRadius) {
+  float blur = defocus(b.z, bigRadius);
+  return clamp(1.5 * blur / max(b.w - blur, 1e-4), 0.0, 1.0);
 }
 
 // Small ball i at time t: xyz = centre (world units), w = radius.
@@ -768,11 +785,11 @@ struct Lens {
   vec3 rdOut;
 };
 
-Lens lensThrough(vec3 ro, vec3 rd, vec4 b, float th) {
+Lens lensThrough(vec3 ro, vec3 rd, vec4 b, float th, float lensScale) {
   Lens l;
   vec3 q = ro + rd * th;
   l.n = (q - b.xyz) / b.w;
-  float ballIor = 1.0 + u_ballLens * 0.5;
+  float ballIor = 1.0 + u_ballLens * 0.5 * lensScale;
   vec3 rdIn = refract(rd, l.n, 1.0 / ballIor);
   if (dot(rdIn, rdIn) < 0.5) {
     rdIn = rd;
@@ -799,15 +816,17 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
   vec3 transmit = pow(max(col, vec3(0.02)), vec3(u_ballDensity * 1.5 * path * tintScale));
   vec3 result = behind * transmit + col * (1.0 - transmit) * 0.12;
 
-  float facing = max(dot(-rd, l.n), 0.0);
-  float fres = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
-  result = mix(result, studioEnv(reflect(rd, l.n), bgLo), fres * u_reflection * 0.55);
-
   // Bokeh: the ball was traced with its radius grown by the circle of
   // confusion; fade its edge across that band so it reads as out of focus,
-  // and spread the highlight the same way.
+  // and let its rim reflection and highlight melt away the same way.
   float blur = max(defocus(b.z, bigRadius), 1e-4);
   float trueR = b.w - blur;
+  float soft = softness(b, bigRadius);
+
+  float facing = max(dot(-rd, l.n), 0.0);
+  float fres = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+  result = mix(result, studioEnv(reflect(rd, l.n), bgLo), fres * u_reflection * 0.55 * (1.0 - 0.7 * soft));
+
   vec3 oc = ro - b.xyz;
   float along = dot(oc, rd);
   float dist = sqrt(max(dot(oc, oc) - along * along, 0.0));
@@ -823,7 +842,7 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
 // A ball seen through another ball: no further lookups behind it.
 vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float bigRadius,
     vec3 bgHi, vec3 bgLo) {
-  Lens l = lensThrough(ro, rd, b, th);
+  Lens l = lensThrough(ro, rd, b, th, 1.0 - 0.7 * softness(b, bigRadius));
   vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo);
   return ballSurface(ro, rd, l, b, bigRadius, col, behind, bgLo, 0.6);
 }
@@ -848,7 +867,7 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
   if (th < 0.0) {
     return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo);
   }
-  Lens l = lensThrough(ro, rdIn, near.ball, th);
+  Lens l = lensThrough(ro, rdIn, near.ball, th, 1.0 - 0.7 * softness(near.ball, bigRadius));
   vec3 behind;
   float thFar = far.index < 0.0 ? -1.0 : sphereHit(l.e, l.rdOut, far.ball.xyz, far.ball.w);
   if (thFar > 0.0) {
@@ -933,7 +952,7 @@ void main() {
   vec3 farCol = vec3(0.0);
   if (near.index >= 0.0) {
     nearCol = ballColor(near.index);
-    Lens lg = lensThrough(roG, rdG, near.ball, near.t);
+    Lens lg = lensThrough(roG, rdG, near.ball, near.t, 1.0 - 0.7 * softness(near.ball, bigRadius));
     far = nearestBall(balls, lg.e, lg.rdOut, near.index);
     if (far.index >= 0.0) {
       farCol = ballColor(far.index);
