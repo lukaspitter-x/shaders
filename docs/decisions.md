@@ -40,6 +40,14 @@ cheap in-app cross-check. Budget: ≤ 16 ms/frame at 2560×1600 with defaults.
 - Every image lookup in a register-heavy shader is a latency stall (14 env
   lookups/pixel cost 30 ms with no bandwidth pressure at all). Feed the image
   to the few sites that matter and let the rest use procedural light.
+- **Hundreds of procedural particles per pixel need a spatial lookup, not a
+  loop.** Brute force costs ~0.35 ms per particle at retina size. The Glass
+  Marbles emitter uses angular sectors x depth layers, and because slots in a
+  sector are staggered in age with no jitter, a pixel's distance from the
+  centre inverts the flight curve to the one or two slots that can be there.
+  768 particles cost ~10 ms; a "check every sector near the centre" zone cost
+  50+ ms and was removed. Per-slot early-outs barely help (the compiler
+  predicates short branches), so cut *structural* work, not branch bodies.
 
 ## D8 — Pencil is strictly WebGL 1.0 / ES 1.00; the preview is more permissive → we must LINT to Pencil
 

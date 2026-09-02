@@ -112,11 +112,17 @@ describe('glass-marbles.glsl', () => {
     const sectors = Number(source.match(/const float P_SECTORS = ([\d.]+);/)?.[1]);
     if (count?.kind === 'slider') expect(count.max).toBe(layers * sectors * perSector);
     // Straight flight from the centre, clamped inside the layer's disc.
-    expect(source).toContain('float travel = min(eased * speed * life * bigRadius, layerR * 0.985 - size);');
+    expect(source).toContain('float travel = min(eased * sc.reach, layerR * 0.985 - size);');
     // Fade out over the last Particle Fade of the life.
     expect(source).toContain('float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);');
     // Hidden behind the nearest ball.
     expect(source).toContain('float tMax = near.index >= 0.0 ? near.t : 1e9;');
+    // Visible from birth: the lookup widens up to four sectors either side
+    // near the centre, and only the slot nominally at this radius (plus its
+    // neighbours) is evaluated per sector.
+    expect(source).toContain('float reachN = min(ceil(rbMax * P_SECTORS / (TAU * max(rho, 1e-4))), 4.0);');
+    expect(source).toContain('float m1 = floor(mReal);');
+    expect(schema.find((c) => c.key === 'u_particleFadeIn')?.section).toBe('Particles');
   });
 
   it('exposes an equirectangular environment map with bundled presets', () => {
