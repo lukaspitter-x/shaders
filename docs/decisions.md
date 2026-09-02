@@ -49,12 +49,14 @@ cheap in-app cross-check. Budget: ≤ 16 ms/frame at 2560×1600 with defaults.
 - Chromatic aberration by tracing R/G/B separately triples the cost. Find the
   hit objects once with the green ray and intersect each channel's ray against
   only those — fringes stay, the search loops don't multiply (77 → 9 ms).
-- **Update (32 balls):** once the second (far) search was dropped, a single
-  search that *recomputes* each ball instead of storing it runs as fast as the
-  16-entry array and scales to 32 (26 → 39 ms/frame at 2560×1600). Two sets of
-  16 through one array did not work: the compiler schedules the independent
-  second set alongside the first and crosses the cliff anyway, even when the
-  set is skipped by a uniform branch.
+- **Update (32 balls, final):** the first 16 balls stay in the array; balls
+  17..32 are *recomputed* inside both searches behind a uniform branch on
+  Count. Crucial detail: code behind a skipped uniform branch still costs if
+  the compiler can hoist it (it computed the extra balls unconditionally and
+  kept them live next to the array → the same cliff). Feeding the recomputed
+  balls a value that depends on the stored search's result
+  (`t + min(h.t, 0.0)`, numerically 0) pins them after it: 14 balls run at the
+  old speed; 32 balls with mutual refraction cost ~3×.
 - **A per-pixel scene array has a hard size cliff on Metal.** With a heavier
   loop body the ball loops were fully unrolled (array in registers) only up to
   **16 iterations**; at 17 the array fell into memory and the shader went from

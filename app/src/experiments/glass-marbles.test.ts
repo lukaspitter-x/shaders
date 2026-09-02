@@ -74,6 +74,7 @@ describe('glass-marbles.glsl', () => {
       'u_lightAngle',
       'u_ballLens',
       'u_ballDensity',
+      'u_ballHaze',
     ]);
     expect(sections.get('Motion')).toEqual([
       'u_speed',
@@ -204,12 +205,17 @@ describe('glass-marbles.glsl', () => {
     }
     // The shader loop is sized to the slider's ceiling.
     expect(source).toContain('const int MAX_BALLS = 32;');
-    // No stored ball array (a >16 array falls out of registers on Metal):
-    // the single search recomputes each ball as it tests it.
-    expect(source).not.toMatch(/vec4\s+balls\[/);
-    expect(source).toContain('vec4 b = ballAt(fi, t, bigRadius, tilt);');
+    // At most 16 balls are stored (a larger array falls out of registers on
+    // Metal); the rest are recomputed inside the searches.
+    expect(source).toContain('vec4 balls[HALF_BALLS];');
+    expect(source).not.toMatch(/vec4\s+balls\[MAX_BALLS\]/);
+    expect(source).toContain('vec4 b = ballAt(fi, t2, bigRadius, tilt);');
+    expect(source).toContain('float t2 = t + min(h.t, 0.0);');
     // Second half of the search only when Count exceeds 16.
     expect(source).toContain('if (u_count > float(HALF_BALLS)) {');
+    // Balls refract each other: the ball behind the nearest is found through its lens.
+    expect(source).toContain('far = searchBalls(balls, lg.e, lg.rdOut, near.index, t + min(near.t, 0.0), bigRadius, tilt);');
+    expect(source).toContain('vec3 shadeBallFar(');
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);

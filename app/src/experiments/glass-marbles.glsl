@@ -209,6 +209,15 @@ uniform float u_ballLens;
  */
 uniform float u_ballDensity;
 
+/**
+ * Milky inner scatter of the glass balls. 0 is clear glass that only tints
+ * what is behind it; higher adds a soft body glow.
+ * @label Ball Haze
+ * @default 0.3
+ * @range 0, 1
+ */
+uniform float u_ballHaze;
+
 // SECTION: Environment
 /**
  * Softbox windows in the procedural studio. They show in the reflections
@@ -579,14 +588,11 @@ uniform float u_bgBrightness;
 // 16 is a hard ceiling from the Metal compiler: the ball loops are fully
 // unrolled up to 16 iterations and keep the ball array in registers; at 17
 // the array falls into memory and the whole shader runs four times slower.
-// No ball array: the single search recomputes each ball as it tests it. A
-// stored array of more than 16 balls falls out of registers on Metal and
-// the whole shader runs four times slower; with one search pass, recomputing
-// is as fast as storing at 16 and scales to 32.
+// The first 16 balls are stored in an array (fast: it stays in registers);
+// a stored array of more than 16 falls out of registers on Metal and the
+// whole shader runs four times slower, so balls 17..32 are recomputed inside
+// the searches, behind one uniform branch on Count.
 const int MAX_BALLS = 32;
-// The search runs as two loops of 16: the second only when Count exceeds 16,
-// behind one uniform branch, so a small flock does not pay for 32 bodies
-// (a per-iteration count test inside one 32-loop gets predicated instead).
 const int HALF_BALLS = 16;
 // Particles live on P_LAYERS depth layers, each cut into P_SECTORS angular
 // sectors holding P_PER_SECTOR particle slots. A pixel only evaluates the
@@ -1043,7 +1049,7 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
   // (0 at the rim, 1 through the centre) scales the tint depth.
   float path = clamp(l.chord / (2.0 * b.w), 0.0, 1.0);
   vec3 transmit = pow(max(col, vec3(0.02)), vec3(u_ballDensity * 1.5 * path * tintScale));
-  vec3 result = behind * transmit + col * (1.0 - transmit) * 0.12;
+  vec3 result = behind * transmit + col * (1.0 - transmit) * 0.4 * u_ballHaze;
 
   // Bokeh: the ball was traced with its radius grown by the circle of
   // confusion; fade its edge across that band so it reads as out of focus,
@@ -1071,14 +1077,22 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
 
 
 
-// One colour channel's view into the sphere. The nearest ball was found
-// once with the green ray; here the channel's own (differently bent) ray is
-// intersected against just that ball, which is what smears the ball edges
-// into colour fringes while keeping the search loops out of the per-channel
-// work. A channel ray that slips past the ball sees the background, as it
-// would past the ball's rim.
+// One colour channel's view into the sphere. The near and far balls were
+// found once with the green ray; here the channel's own (differently bent)
+// ray is intersected against just those two, which is what smears the ball
+// edges into colour fringes while keeping the search loops out of the
+// per-channel work. A channel ray that slips past the ball sees the
+// background, as it would past the ball's rim.
+// A ball seen through another ball: no further lookups behind it.
+vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float bigRadius,
+    vec3 bgHi, vec3 bgLo, float detail) {
+  Lens l = lensThrough(ro, rd, b, th, 1.0 - 0.7 * softness(b, bigRadius));
+  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
+  return ballSurface(ro, rd, l, b, bigRadius, col, behind, bgLo, 0.6);
+}
+
 vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo,
-    float detail, Hit near, vec3 nearCol) {
+    float detail, Hit near, vec3 nearCol, Hit far, vec3 farCol) {
   vec3 rdIn = refract(rd, n1, 1.0 / ior);
   if (dot(rdIn, rdIn) < 0.5) {
     rdIn = rd;
@@ -1092,7 +1106,13 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
     return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo, detail);
   }
   Lens l = lensThrough(ro, rdIn, near.ball, th, 1.0 - 0.7 * softness(near.ball, bigRadius));
-  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
+  vec3 behind;
+  float thFar = far.index < 0.0 ? -1.0 : sphereHit(l.e, l.rdOut, far.ball.xyz, far.ball.w);
+  if (thFar > 0.0) {
+    behind = shadeBallFar(far.ball, farCol, l.e, l.rdOut, thFar, ior, bigRadius, bgHi, bgLo, detail);
+  } else {
+    behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
+  }
   return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
 }
 
@@ -1279,6 +1299,48 @@ vec4 ballAt(float fi, float t, float bigRadius, mat3 tilt) {
   return b;
 }
 
+// Nearest ball along a ray, skipping index `skip`: the stored first 16,
+// then, only when Count exceeds 16, the recomputed rest.
+Hit searchBalls(vec4 balls[HALF_BALLS], vec3 ro, vec3 rd, float skip, float t, float bigRadius,
+    mat3 tilt) {
+  Hit h;
+  h.t = 1e9;
+  h.index = -1.0;
+  h.ball = vec4(0.0);
+  for (int i = 0; i < HALF_BALLS; i++) {
+    float fi = float(i);
+    if (fi < u_count && fi != skip) {
+      float th = sphereHit(ro, rd, balls[i].xyz, balls[i].w);
+      if (th > 0.0 && th < h.t) {
+        h.t = th;
+        h.index = fi;
+        h.ball = balls[i];
+      }
+    }
+  }
+  if (u_count > float(HALF_BALLS)) {
+    // Balls 17..32 are recomputed here rather than stored: a stored array
+    // of more than 16 falls out of registers on Metal. min(h.t, 0) is 0,
+    // but ties these balls to the stored search's result so the compiler
+    // cannot hoist them above the branch and keep them live alongside the
+    // array (which is the same cliff by another route).
+    float t2 = t + min(h.t, 0.0);
+    for (int i = HALF_BALLS; i < MAX_BALLS; i++) {
+      float fi = float(i);
+      if (fi < u_count && fi != skip) {
+        vec4 b = ballAt(fi, t2, bigRadius, tilt);
+        float th = sphereHit(ro, rd, b.xyz, b.w);
+        if (th > 0.0 && th < h.t) {
+          h.t = th;
+          h.index = fi;
+          h.ball = b;
+        }
+      }
+    }
+  }
+  return h;
+}
+
 void main() {
   vec2 res = u_resolution;
   float shortSide = min(res.x, res.y);
@@ -1344,42 +1406,33 @@ void main() {
     rdG = rd;
   }
   vec3 roG = p1 + rdG * 1e-4;
-  Hit near;
-  near.t = 1e9;
-  near.index = -1.0;
-  near.ball = vec4(0.0);
+  vec4 balls[HALF_BALLS];
   for (int i = 0; i < HALF_BALLS; i++) {
-    float fi = float(i);
-    if (fi < u_count) {
-      vec4 b = ballAt(fi, t, bigRadius, tilt);
-      float th = sphereHit(roG, rdG, b.xyz, b.w);
-      if (th > 0.0 && th < near.t) {
-        near.t = th;
-        near.index = fi;
-        near.ball = b;
-      }
-    }
+    balls[i] = ballAt(float(i), t, bigRadius, tilt);
   }
-  if (u_count > float(HALF_BALLS)) {
-    for (int i = HALF_BALLS; i < MAX_BALLS; i++) {
-      float fi = float(i);
-      if (fi < u_count) {
-        vec4 b = ballAt(fi, t, bigRadius, tilt);
-        float th = sphereHit(roG, rdG, b.xyz, b.w);
-        if (th > 0.0 && th < near.t) {
-          near.t = th;
-          near.index = fi;
-          near.ball = b;
-        }
-      }
+  Hit near = searchBalls(balls, roG, rdG, -1.0, t, bigRadius, tilt);
+  Hit far;
+  far.t = 1e9;
+  far.index = -1.0;
+  far.ball = vec4(0.0);
+  vec3 farCol = vec3(0.0);
+  if (near.index >= 0.0) {
+    // The ball behind the nearest one, through its lens: this is what makes
+    // the balls refract each other.
+    Lens lg = lensThrough(roG, rdG, near.ball, near.t, 1.0 - 0.7 * softness(near.ball, bigRadius));
+    // min(near.t, 0) is 0, but ties this search to the first one's result
+    // so the compiler cannot hoist and merge the recomputed balls.
+    far = searchBalls(balls, lg.e, lg.rdOut, near.index, t + min(near.t, 0.0), bigRadius, tilt);
+    if (far.index >= 0.0) {
+      farCol = ballColor(far.index);
     }
   }
   vec3 nearCol = near.index >= 0.0 ? ballColor(near.index) : vec3(0.0);
 
   vec3 interior = vec3(
-      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol).r,
-      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol).g,
-      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol).b);
+      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).r,
+      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).g,
+      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).b);
 
   if (u_particleCount > 0.5) {
     float tMax = near.index >= 0.0 ? near.t : 1e9;
