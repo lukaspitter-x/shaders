@@ -286,6 +286,7 @@ describe('glass-marbles.glsl ball slots', () => {
     );
     expect(source).toContain('float axisShrink = rho < 0.01 ? 0.72 : 1.0;');
     expect(source).toContain('wander /= max(1.0, length(wander));');
-    expect(source).toContain('pos += wander * (room - radius) * 0.95;');
+    // (Guarantee holds for Ball Size <= 1; above it balls outgrow their slots by design.)
+    expect(source).toContain('pos += wander * max(room - radius, 0.0) * 0.95;');
   });
 });

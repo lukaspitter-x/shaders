@@ -301,13 +301,14 @@ uniform float u_count;
 
 /**
  * How much of its private room each ball fills. Every ball owns a slot on
- * one of a few rings around the whirl axis; the slots never overlap, so
- * balls can never intersect each other whatever the motion dials do. At 1 a
- * ball fills its slot and has no room left to move; the three balls on the
- * axis are kept a little smaller so they can drift.
+ * one of a few rings around the whirl axis; the slots never overlap, so up
+ * to 1 balls can never intersect each other whatever the motion dials do.
+ * At 1 a ball fills its slot and has no room left to move; above 1 balls
+ * outgrow their slots and may pass through each other. The three balls on
+ * the axis are kept a little smaller so they can drift.
  * @label Ball Size
  * @default 0.75
- * @range 0.2, 1
+ * @range 0.2, 2
  */
 uniform float u_ballSize;
 
@@ -895,7 +896,7 @@ vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   vec3 wander = u_turbulence * (drift + jitter);
   wander.y += u_bob * sin(t * (0.6 + g.w) + h.z * TAU);
   wander /= max(1.0, length(wander));
-  pos += wander * (room - radius) * 0.95;
+  pos += wander * max(room - radius, 0.0) * 0.95;
 
   float scale = bigRadius * u_spread;
   pos = tilt * (pos * scale);
