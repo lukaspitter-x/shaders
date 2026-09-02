@@ -31,12 +31,12 @@ uniform float u_time;
 
 // SECTION: Sphere
 /**
- * Fill Shape stretches the marble to the layer's bounds, so an oval layer
- * gets an oval marble that meets its edges (with Size at 1). Circle keeps
- * it round, sized by the short side.
+ * Circle keeps the marble round, sized by the layer's short side. Fill
+ * Shape stretches it to the layer's bounds instead, so an oval layer gets
+ * an oval marble that meets its edges (with Size at 1).
  * @label Fit
  * @select Circle, Fill Shape
- * @default 1
+ * @default 0
  */
 uniform float u_fit;
 

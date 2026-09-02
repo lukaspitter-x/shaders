@@ -94,7 +94,7 @@ describe('glass-marbles.glsl', () => {
     expect(fit?.kind).toBe('select');
     expect(fit?.section).toBe('Sphere');
     if (fit?.kind === 'select') expect(fit.options.map((o) => o.label)).toEqual(['Circle', 'Fill Shape']);
-    expect(defaults.u_fit).toBe('1');
+    expect(defaults.u_fit).toBe('0');
     expect(source).toContain('? (gl_FragCoord.xy - 0.5 * res) / (0.5 * res)');
   });
 
