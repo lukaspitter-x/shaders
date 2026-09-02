@@ -57,7 +57,6 @@ describe('glass-marbles.glsl', () => {
       'Focus',
       'Balls',
       'Motion',
-      'Particles',
       'Palette',
     ]);
     expect(sections.get('Glass')).toEqual([
@@ -121,31 +120,6 @@ describe('glass-marbles.glsl', () => {
     const idx = source.indexOf('color = mix(color, u_backdropColor, backdrop * u_backdropOpacity);');
     expect(idx).toBeGreaterThan(source.indexOf('color = toGamma(color);'));
     expect(idx).toBeLessThan(source.indexOf('gl_FragColor = vec4(mix(u_outside'));
-  });
-
-  it('emits hundreds of particles from the centre via a sector field', () => {
-    const { schema } = parseShader(source);
-    const count = schema.find((c) => c.key === 'u_particleCount');
-    const speed = schema.find((c) => c.key === 'u_particleSpeed');
-    expect(count?.section).toBe('Particles');
-    expect(speed?.section).toBe('Particles');
-    // Capacity = layers x sectors x slots, matching the Count dial's ceiling.
-    const layers = Number(source.match(/const int P_LAYERS = (\d+);/)?.[1]);
-    const perSector = Number(source.match(/const int P_PER_SECTOR = (\d+);/)?.[1]);
-    const sectors = Number(source.match(/const float P_SECTORS = ([\d.]+);/)?.[1]);
-    if (count?.kind === 'slider') expect(count.max).toBe(layers * sectors * perSector);
-    // Straight flight from the centre, clamped inside the layer's disc.
-    expect(source).toContain('float travel = min(eased * sc.reach, layerR * 0.985 - size);');
-    // Fade out over the last Particle Fade of the life.
-    expect(source).toContain('float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);');
-    // Hidden behind the nearest ball.
-    expect(source).toContain('float tMax = near.index >= 0.0 ? near.t : 1e9;');
-    // Visible from birth: the lookup widens up to four sectors either side
-    // near the centre, and only the slot nominally at this radius (plus its
-    // neighbours) is evaluated per sector.
-    expect(source).toContain('float reachN = min(ceil(rbMax * P_SECTORS / (TAU * max(rho, 1e-4))), 4.0);');
-    expect(source).toContain('float m1 = floor(mReal);');
-    expect(schema.find((c) => c.key === 'u_particleFadeIn')?.section).toBe('Particles');
   });
 
   it('exposes an equirectangular environment map with bundled presets', () => {
@@ -221,13 +195,7 @@ describe('glass-marbles.glsl', () => {
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
-    expect(colors).toEqual([
-      'u_outside',
-      'u_backdropColor',
-      'u_fresnelColor',
-      'u_particleColor',
-      'u_keyColor',
-    ]);
+    expect(colors).toEqual(['u_outside', 'u_backdropColor', 'u_fresnelColor', 'u_keyColor']);
     expect(defaults.u_keyColor).toBe('#ea5a78');
     expect(schema.find((c) => c.key === 'u_baseHue')).toBeUndefined();
   });

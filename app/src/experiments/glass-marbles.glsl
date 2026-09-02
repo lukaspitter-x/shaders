@@ -398,109 +398,6 @@ uniform float u_tumble;
  */
 uniform float u_tilt;
 
-// SECTION: Particles
-/**
- * Number of particles emitted from the centre of the sphere, spread over
- * two depth layers. 0 turns the emitter off.
- * @label Particle Count
- * @default 240
- * @range 0, 768
- * @step 1
- */
-uniform float u_particleCount;
-
-/**
- * Colour of the particles. White glows on a dark sphere, a dark tone reads
- * on a light one.
- * @label Particle Colour
- * @color
- * @default #ffffff
- */
-uniform vec3 u_particleColor;
-
-/**
- * Opacity of a particle at full life.
- * @label Particle Opacity
- * @default 0.9
- * @range 0, 1
- */
-uniform float u_particleOpacity;
-
-/**
- * Radius of a particle relative to the sphere.
- * @label Particle Size
- * @default 0.02
- * @range 0.004, 0.06
- */
-uniform float u_particleSize;
-
-/**
- * How much particle sizes differ from each other.
- * @label Particle Size Variation
- * @default 0.5
- * @range 0, 1
- */
-uniform float u_particleSizeVar;
-
-/**
- * Velocity of the particles, in sphere radii per second. A particle that
- * reaches the glass stops there and fades.
- * @label Particle Speed
- * @default 0.35
- * @range 0, 3
- */
-uniform float u_particleSpeed;
-
-/**
- * Random per-particle variation of speed.
- * @label Particle Speed Variation
- * @default 0.4
- * @range 0, 1
- */
-uniform float u_particleSpeedVar;
-
-/**
- * Seconds from birth at the centre to death.
- * @label Particle Lifetime
- * @default 3
- * @range 0.5, 12
- */
-uniform float u_particleLife;
-
-/**
- * How a particle appears at birth: 0 pops in at full strength at the
- * centre, 1 fades in over the first part of its life.
- * @label Particle Fade In
- * @default 0.1
- * @range 0, 1
- */
-uniform float u_particleFadeIn;
-
-/**
- * Fraction of the life over which a particle fades out at the end.
- * @label Particle Fade
- * @default 0.5
- * @range 0.05, 1
- */
-uniform float u_particleFade;
-
-/**
- * Edge softness of each particle: 0 is a hard dot, 1 a soft glow.
- * @label Particle Softness
- * @default 0.6
- * @range 0, 1
- */
-uniform float u_particleSoftness;
-
-/**
- * Ease-out of the flight: 0 flies at a constant speed, 1 shoots out fast
- * and slows toward the end.
- * @label Particle Slowdown
- * @default 0.5
- * @range 0, 1
- */
-uniform float u_particleSlowdown;
-
 // SECTION: Palette
 /**
  * Colour-theory scheme the ball colours are drawn from.
@@ -595,14 +492,6 @@ uniform float u_bgBrightness;
 // the searches, behind one uniform branch on Count.
 const int MAX_BALLS = 32;
 const int HALF_BALLS = 16;
-// Particles live on P_LAYERS depth layers, each cut into P_SECTORS angular
-// sectors holding P_PER_SECTOR particle slots. A pixel only evaluates the
-// sectors around its own angle, and within a sector only the slots whose
-// staggered age puts them at the pixel's distance from the centre, so
-// hundreds of particles cost about as much as a dozen brute-force ones.
-const int P_LAYERS = 2;
-const int P_PER_SECTOR = 12;
-const float P_SECTORS = 32.0;
 const float TAU = 6.28318530718;
 const float CAMERA_DIST = 5.0;
 
@@ -925,7 +814,6 @@ struct Hit {
   vec4 ball;
 };
 
-
 vec3 lightDir() {
   float a = radians(u_lightAngle);
   return normalize(vec3(cos(a), sin(a), 0.9));
@@ -1077,7 +965,6 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
 }
 
 
-
 // One colour channel's view into the sphere. The near and far balls were
 // found once with the green ray; here the channel's own (differently bent)
 // ray is intersected against just those two, which is what smears the ball
@@ -1149,177 +1036,8 @@ vec3 channelBackground(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, ve
   return exitEnv(p1 + rdIn * 1e-4, rdIn, ior, bigRadius, bgHi, bgLo, detail);
 }
 
-// Inverse of the flight ease: which age has travelled the fraction `e` of a
-// full life's reach. eased = (1 + s) age - s age^2.
-float easeInverse(float e, float slow) {
-  if (slow < 0.01) {
-    return e;
-  }
-  float b = 1.0 + slow;
-  return (b - sqrt(max(b * b - 4.0 * slow * e, 0.0))) / (2.0 * slow);
-}
 
-// Everything about one particle sector (angular wedge on one layer) that
-// its slots share: speed, time phase, reach.
-struct Sector {
-  float k;
-  float speed;
-  float tau;
-  float reach;
-};
 
-Sector sectorAt(float k, float layerIndex, float t, float life, float bigRadius) {
-  Sector sc;
-  vec4 hs = hash4(vec2(k * 3.7 + layerIndex * 57.0, u_layoutSeed * 1.91 + 8.0));
-  sc.k = k;
-  sc.speed = u_particleSpeed * (1.0 + (hs.x - 0.5) * 2.0 * u_particleSpeedVar);
-  sc.tau = t / life + hs.y;
-  sc.reach = sc.speed * life * bigRadius;
-  return sc;
-}
-
-// Soft-disc coverage of one particle slot at the three channel crossing
-// points q of its layer plane. Ordered so that the cheap tests (alive
-// slot, radial distance) run before any hashing.
-vec3 particleSlot(Sector sc, float m, float layerIndex, float zL, float layerR,
-    float bigRadius, float rbMax, vec2 qR, vec2 qG, vec2 qB) {
-  float slots = float(P_SECTORS) * float(P_PER_SECTOR) * float(P_LAYERS);
-  // The first (count / capacity) slots of every sector are alive; the
-  // fractional remainder is settled per sector.
-  float perSector = u_particleCount / slots * float(P_PER_SECTOR);
-  if (m + 1.0 - fract(sc.tau * 0.0 + sc.k * 0.618) > perSector) {
-    return vec3(0.0);
-  }
-  float age = fract(sc.tau + m / float(P_PER_SECTOR));
-  float eased = mix(age, age * (2.0 - age), u_particleSlowdown);
-  float rho = length(qG);
-  // Radial early-out with the largest possible size: a particle at the
-  // wrong distance from the centre cannot touch this pixel.
-  float travelMax = min(eased * sc.reach, layerR * 0.985);
-  if (abs(travelMax - rho) > rbMax * 2.0) {
-    return vec3(0.0);
-  }
-
-  vec4 h = hash4(vec2(sc.k * 3.7 + m * 11.3 + layerIndex * 57.0, u_layoutSeed * 1.37 + 3.0));
-  float size = u_particleSize * bigRadius * mix(1.0, mix(0.4, 1.4, h.y), u_particleSizeVar);
-  float travel = min(eased * sc.reach, layerR * 0.985 - size);
-
-  float fadeIn = smoothstep(0.0, max(u_particleFadeIn * 0.4, 0.003), age);
-  float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);
-  float alive = fadeIn * fadeOut;
-  if (alive < 0.001) {
-    return vec3(0.0);
-  }
-
-  // Particles are tiny, so cap how far defocus can grow them: it keeps the
-  // sector lookup valid.
-  float r = size * (0.6 + 0.4 * alive);
-  float rb = r + min(defocus(zL, bigRadius), r * 0.4);
-  // The lookup widens to four sectors either side near the centre; a
-  // particle wider than that is faded until it fits.
-  float clear = rb * P_SECTORS / (TAU * 4.0);
-  alive *= smoothstep(clear * 0.5, clear, travel);
-
-  float ang = ((sc.k + h.x) / P_SECTORS - 0.5) * TAU + layerIndex * 2.1;
-  vec2 c = travel * vec2(cos(ang), sin(ang));
-  vec2 dg = qG - c;
-  float d2g = dot(dg, dg);
-  if (d2g > rb * rb * 2.5) {
-    return vec3(0.0);
-  }
-  float energy = alive * (r * r) / (rb * rb);
-  vec3 d2 = vec3(dot(qR - c, qR - c), d2g, dot(qB - c, qB - c));
-  vec3 kk = clamp(1.0 - d2 / (rb * rb), 0.0, 1.0);
-  vec3 edge = mix(smoothstep(0.0, 0.25, kk), kk * kk, u_particleSoftness);
-  return edge * energy;
-}
-
-// Accumulate one sector's particles into `cover`.
-vec3 sectorCover(vec3 cover, float k, float layerIndex, float zL, float layerR, float t, float life,
-    float bigRadius, float rbMax, float rho, float edgeR, vec2 qR, vec2 qG, vec2 qB) {
-  float slots = float(P_PER_SECTOR);
-  Sector sc = sectorAt(k, layerIndex, t, life, bigRadius);
-  if (sc.reach > edgeR && rho > edgeR - rbMax * 2.0) {
-    // Particles from this sector pile up against the glass here: any slot
-    // can be present.
-    for (int m = 0; m < P_PER_SECTOR; m++) {
-      vec3 a = particleSlot(sc, float(m), layerIndex, zL, layerR, bigRadius, rbMax, qR, qG, qB);
-      cover = cover + a - cover * a;
-    }
-    return cover;
-  }
-  // Only the two slots whose staggered age can put them at this radius
-  // (slots have no age jitter, so the inverse is exact up to the
-  // particle's own radial extent).
-  float e = clamp(rho / max(sc.reach, 1e-4), 0.0, 1.0);
-  float mReal = fract(easeInverse(e, u_particleSlowdown) - sc.tau) * slots;
-  float m1 = floor(mReal);
-  vec3 a = particleSlot(sc, mod(m1, slots), layerIndex, zL, layerR, bigRadius, rbMax, qR, qG, qB);
-  cover = cover + a - cover * a;
-  a = particleSlot(sc, mod(m1 + 1.0, slots), layerIndex, zL, layerR, bigRadius, rbMax, qR, qG, qB);
-  return cover + a - cover * a;
-}
-
-// Per-channel particle coverage for the three refracted rays, so particles
-// near the glass pick up the same colour fringes as everything else.
-vec3 particleCover(vec3 p1, vec3 n1, vec3 rd, float ior, float spread, float t, float bigRadius,
-    float tMax) {
-  vec3 rdR = refract(rd, n1, 1.0 / (ior - spread));
-  vec3 rdG = refract(rd, n1, 1.0 / ior);
-  vec3 rdB = refract(rd, n1, 1.0 / (ior + spread));
-  if (dot(rdG, rdG) < 0.5) {
-    rdR = rd;
-    rdG = rd;
-    rdB = rd;
-  }
-  float life = max(u_particleLife, 0.05);
-  float sizeMax = u_particleSize * bigRadius * 1.4;
-  float rbMax = sizeMax * 1.4;
-  vec3 cover = vec3(0.0);
-  for (int L = 0; L < P_LAYERS; L++) {
-    float layerIndex = float(L);
-    float zL = (layerIndex - 0.5) * 0.7 * bigRadius;
-    float layerR = sqrt(max(bigRadius * bigRadius - zL * zL, 0.0));
-    float tG = (zL - p1.z) / min(rdG.z, -1e-4);
-    if (tG <= 0.0 || tG > tMax) {
-      continue;
-    }
-    vec2 qG = p1.xy + rdG.xy * tG;
-    vec2 qR = p1.xy + rdR.xy * ((zL - p1.z) / min(rdR.z, -1e-4));
-    vec2 qB = p1.xy + rdB.xy * ((zL - p1.z) / min(rdB.z, -1e-4));
-    float rho = length(qG);
-    float theta = atan(qG.y, qG.x) - layerIndex * 2.1;
-    float k0 = floor((theta / TAU + 0.5) * P_SECTORS);
-    // How many sectors either side a particle here can span (wider near
-    // the centre, where sectors are narrow), at most four.
-    float reachN = min(ceil(rbMax * P_SECTORS / (TAU * max(rho, 1e-4))), 4.0);
-    // Pixels in the thin ring where particles pile up against the glass
-    // must check every slot; elsewhere only the slot nominally at this
-    // radius and its two neighbours can be here.
-    float edgeR = layerR * 0.985 - sizeMax;
-
-    // Most pixels only need the three sectors around their angle; near the
-    // centre, where sectors are narrow, widen to nine.
-    if (reachN <= 1.0) {
-      for (int sIdx = 0; sIdx < 3; sIdx++) {
-        float k = mod(k0 + float(sIdx) - 1.0 + P_SECTORS, P_SECTORS);
-        cover = sectorCover(cover, k, layerIndex, zL, layerR, t, life, bigRadius, rbMax, rho, edgeR,
-            qR, qG, qB);
-      }
-    } else {
-      for (int sIdx = 0; sIdx < 9; sIdx++) {
-        float off = float(sIdx) - 4.0;
-        if (abs(off) > reachN) {
-          continue;
-        }
-        float k = mod(k0 + off + P_SECTORS * 4.0, P_SECTORS);
-        cover = sectorCover(cover, k, layerIndex, zL, layerR, t, life, bigRadius, rbMax, rho, edgeR,
-            qR, qG, qB);
-      }
-    }
-  }
-  return cover;
-}
 
 // A traced ball: its radius grown by the circle of confusion, or a dead
 // entry past the Count dial.
@@ -1480,12 +1198,6 @@ void main() {
       interior.r = bgR.r;
       interior.b = bgB.b;
     }
-  }
-
-  if (u_particleCount > 0.5) {
-    float tMax = near.index >= 0.0 ? near.t : 1e9;
-    vec3 pa = particleCover(p1, n1, rd, ior, spread, t, bigRadius, tMax) * u_particleOpacity;
-    interior = mix(interior, toLinear(u_particleColor), pa);
   }
 
   float f0 = (ior - 1.0) / (ior + 1.0);
