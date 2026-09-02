@@ -15,6 +15,7 @@ import chromeSource from './chrome.glsl?raw';
 import chromeDrapeSource from './chrome-drape.glsl?raw';
 import chromeFlowSource from './chrome-flow.glsl?raw';
 import flipPlasmaSource from './flip-plasma.glsl?raw';
+import glassMarblesSource from './glass-marbles.glsl?raw';
 import gradientSource from './gradient.glsl?raw';
 import imageTintSource from './image-tint.glsl?raw';
 import liquidChromeSource from './liquid-chrome.glsl?raw';
@@ -45,6 +46,7 @@ export const EXPERIMENTS: ShaderExperiment[] = [
   { id: 'chrome-drape', label: 'Chrome Drape', type: 'fill', source: chromeDrapeSource },
   { id: 'chrome-flow', label: 'Chrome Flow', type: 'fill', source: chromeFlowSource },
   { id: 'flip-plasma', label: 'Flip Plasma', type: 'fill', source: flipPlasmaSource },
+  { id: 'glass-marbles', label: 'Glass Marbles', type: 'fill', source: glassMarblesSource },
   { id: 'gradient', label: 'Gradient', type: 'fill', source: gradientSource },
   { id: 'image-tint', label: 'Image Tint', type: 'fill', source: imageTintSource },
   { id: 'liquid-chrome', label: 'Liquid Chrome', type: 'fill', source: liquidChromeSource },

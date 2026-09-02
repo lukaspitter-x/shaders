@@ -6,6 +6,29 @@ Newest first. Each entry: **what** we decided, **why**, and how to revisit it.
 
 ---
 
+## D10 — Verify heavy shaders with the headless-Chromium bench, not the collaborative preview tab
+
+**Learned 2026-09-02** building Glass Marbles. The collaborative browser tab
+used for screenshots appears to render WebGL in software: a shader that runs
+at 60 fps in a real Chrome (9 ms/frame at 2560×1600 on Metal) stalled that
+tab's main thread for minutes, so every `evaluate`/`snapshot` timed out and it
+looked like a compile hang. It was not — compile + link took ~170 ms.
+
+**Decision:** for anything heavier than a gradient, measure compile / link /
+first-draw / per-frame time in a standalone WebGL2 harness driven by headless
+Chromium with `--use-angle=metal` (Playwright, real GPU), and read the rendered
+frame back as a JPEG. The app's own FPS counter (read via `innerText`) is the
+cheap in-app cross-check. Budget: ≤ 16 ms/frame at 2560×1600 with defaults.
+
+**Shader-side lessons from the same session (Pencil ES 1.00 safe):**
+- No recursion, no `out` as an identifier, no computed array indices in a
+  fragment shader — copy the hit element out inside the loop via a struct.
+- Precompute per-pixel scene data (ball positions) into a local array once;
+  keep the hot loops to pure intersection tests.
+- Chromatic aberration by tracing R/G/B separately triples the cost. Find the
+  hit objects once with the green ray and intersect each channel's ray against
+  only those — fringes stay, the search loops don't multiply (77 → 9 ms).
+
 ## D8 — Pencil is strictly WebGL 1.0 / ES 1.00; the preview is more permissive → we must LINT to Pencil
 
 **Tested 2026-06-30** (probe batteries in `~/Work/_pencil/{flip-glsl-tests,webgl2-tests}/`;
