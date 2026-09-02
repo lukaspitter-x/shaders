@@ -88,6 +88,16 @@ describe('glass-marbles.glsl', () => {
     expect(source).toContain('return mix(behind, result, cover);');
   });
 
+  it('fits the marble to the layer bounds so oval layers get oval marbles', () => {
+    const { schema, defaults } = parseShader(source);
+    const fit = schema.find((c) => c.key === 'u_fit');
+    expect(fit?.kind).toBe('select');
+    expect(fit?.section).toBe('Sphere');
+    if (fit?.kind === 'select') expect(fit.options.map((o) => o.label)).toEqual(['Circle', 'Fill Shape']);
+    expect(defaults.u_fit).toBe('1');
+    expect(source).toContain('? (gl_FragCoord.xy - 0.5 * res) / (0.5 * res)');
+  });
+
   it('lays a screen-space radial backdrop above the sphere for text', () => {
     const { schema, defaults } = parseShader(source);
     for (const key of ['u_backdropColor', 'u_backdropOpacity', 'u_backdropSize', 'u_backdropSoftness']) {

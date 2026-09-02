@@ -31,8 +31,17 @@ uniform float u_time;
 
 // SECTION: Sphere
 /**
- * Radius of the big sphere relative to the short side of the canvas.
- * 1 touches the edges.
+ * Fill Shape stretches the marble to the layer's bounds, so an oval layer
+ * gets an oval marble that meets its edges (with Size at 1). Circle keeps
+ * it round, sized by the short side.
+ * @label Fit
+ * @select Circle, Fill Shape
+ * @default 1
+ */
+uniform float u_fit;
+
+/**
+ * Radius of the big sphere relative to the layer. 1 touches the edges.
  * @label Size
  * @default 0.82
  * @range 0.3, 1.2
@@ -1215,7 +1224,11 @@ vec3 particleCover(vec3 p1, vec3 n1, vec3 rd, float ior, float spread, float t, 
 void main() {
   vec2 res = u_resolution;
   float shortSide = min(res.x, res.y);
-  vec2 p = (gl_FragCoord.xy - 0.5 * res) / (0.5 * shortSide);
+  // Fill Shape normalises each axis by its own extent, so the unit circle
+  // of the marble maps to the ellipse inscribed in the layer.
+  vec2 p = u_fit > 0.5
+      ? (gl_FragCoord.xy - 0.5 * res) / (0.5 * res)
+      : (gl_FragCoord.xy - 0.5 * res) / (0.5 * shortSide);
   float t = u_time * u_speed;
   float bigRadius = u_size;
 
