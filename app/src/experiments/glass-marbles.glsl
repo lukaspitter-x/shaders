@@ -152,6 +152,31 @@ uniform float u_reflection;
 uniform float u_reflectionFalloff;
 
 /**
+ * Colour of the fresnel rim glow on the sphere and, fainter, on each ball.
+ * @label Fresnel Colour
+ * @color
+ * @default #ffffff
+ */
+uniform vec3 u_fresnelColor;
+
+/**
+ * Strength of the fresnel rim glow. 0 turns it off.
+ * @label Fresnel
+ * @default 0.4
+ * @range 0, 2
+ */
+uniform float u_fresnel;
+
+/**
+ * How far the rim glow reaches in from the edge: 0 a thin line, 1 a wide
+ * halo.
+ * @label Fresnel Width
+ * @default 0.4
+ * @range 0, 1
+ */
+uniform float u_fresnelWidth;
+
+/**
  * Brightness of the key-light highlights.
  * @label Highlight
  * @default 0.8
@@ -575,6 +600,13 @@ const float TAU = 6.28318530718;
 const float CAMERA_DIST = 5.0;
 
 // ---------------------------------------------------------------- colour --
+
+// Coloured fresnel rim: linear colour scaled by strength and a falloff whose
+// power follows Fresnel Width (thin line .. wide halo).
+vec3 fresnelGlow(float facing, float scale) {
+  float power = mix(6.0, 1.5, u_fresnelWidth);
+  return pow(u_fresnelColor, vec3(2.2)) * u_fresnel * scale * pow(1.0 - facing, power);
+}
 
 vec3 toGamma(vec3 c) {
   return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
@@ -1023,6 +1055,7 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
   float facing = max(dot(-rd, l.n), 0.0);
   float fres = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
   result = mix(result, studioPlain(reflect(rd, l.n), bgLo), fres * u_reflection * 0.55 * (1.0 - 0.7 * soft));
+  result += fresnelGlow(facing, 0.5 * (1.0 - 0.7 * soft));
 
   vec3 oc = ro - b.xyz;
   float along = dot(oc, rd);
@@ -1362,6 +1395,9 @@ void main() {
   vec3 h = normalize(lightDir() - rd);
   float ndh = max(dot(n1, h), 0.0);
   color += (pow(ndh, 400.0) * 1.2 + pow(ndh, 30.0) * 0.12) * u_highlight * rimMask;
+
+  // Coloured fresnel rim glow.
+  color += fresnelGlow(facing, 1.0);
 
   // Thick glass at the rim: a darker band just inside a thin bright edge.
   float grazing = pow(1.0 - facing, 3.0);

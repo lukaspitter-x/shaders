@@ -67,6 +67,9 @@ describe('glass-marbles.glsl', () => {
       'u_rippleScale',
       'u_reflection',
       'u_reflectionFalloff',
+      'u_fresnelColor',
+      'u_fresnel',
+      'u_fresnelWidth',
       'u_highlight',
       'u_lightAngle',
       'u_ballLens',
@@ -210,7 +213,13 @@ describe('glass-marbles.glsl', () => {
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
-    expect(colors).toEqual(['u_outside', 'u_backdropColor', 'u_particleColor', 'u_keyColor']);
+    expect(colors).toEqual([
+      'u_outside',
+      'u_backdropColor',
+      'u_fresnelColor',
+      'u_particleColor',
+      'u_keyColor',
+    ]);
     expect(defaults.u_keyColor).toBe('#ea5a78');
     expect(schema.find((c) => c.key === 'u_baseHue')).toBeUndefined();
   });
