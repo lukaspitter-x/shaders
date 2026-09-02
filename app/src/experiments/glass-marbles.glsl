@@ -55,6 +55,41 @@ uniform vec3 u_outside;
  */
 uniform float u_outsideOpacity;
 
+// SECTION: Text Backdrop
+/**
+ * A radial gradient laid over the middle of the sphere, above everything,
+ * to keep text placed there readable. Use a light or dark colour.
+ * @label Backdrop Colour
+ * @color
+ * @default #ffffff
+ */
+uniform vec3 u_backdropColor;
+
+/**
+ * Opacity of the backdrop at its centre. 0 hides it.
+ * @label Backdrop Opacity
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_backdropOpacity;
+
+/**
+ * Radius of the backdrop relative to the sphere.
+ * @label Backdrop Size
+ * @default 0.6
+ * @range 0.1, 1.2
+ */
+uniform float u_backdropSize;
+
+/**
+ * How gradually the backdrop fades out toward its edge. 0 is a hard disc,
+ * 1 fades from the centre.
+ * @label Backdrop Softness
+ * @default 0.6
+ * @range 0, 1
+ */
+uniform float u_backdropSoftness;
+
 // SECTION: Glass
 /**
  * How strongly the sphere bends what is inside it. 0 is flat window glass,
@@ -96,6 +131,15 @@ uniform float u_rippleScale;
  * @range 0, 1
  */
 uniform float u_reflection;
+
+/**
+ * Keeps the sphere's reflections, highlight and studio structure to the
+ * rim: 0 shows them everywhere, 1 clears the centre completely.
+ * @label Reflection Falloff
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_reflectionFalloff;
 
 /**
  * Brightness of the key-light highlights.
@@ -749,12 +793,12 @@ vec3 studioEnvImage(vec3 dir, vec3 bgLo) {
 
 // The background that fills the inside of the big sphere: the tint
 // gradient with the softboxes faintly in it, optionally the image itself.
-vec3 bgEnv(vec3 dir, vec3 bgHi, vec3 bgLo) {
+vec3 bgEnv(vec3 dir, vec3 bgHi, vec3 bgLo, float detail) {
   float v = smoothstep(-0.9, 0.9, dir.y);
   vec3 c = mix(bgLo, bgHi, v);
   float glow = pow(max(dot(dir, lightDir()), 0.0), 3.0);
   c += glow * 0.18 * bgHi;
-  c *= 1.0 - u_studioDetail * 0.3 + softboxes(dir) * u_studioDetail * 0.45;
+  c *= 1.0 - detail * 0.3 + softboxes(dir) * detail * 0.45;
   if (u_envThrough > 0.001) {
     c = mix(c, envImage(dir) * mix(vec3(1.0), bgHi, 0.35), u_envThrough);
   }
@@ -763,7 +807,7 @@ vec3 bgEnv(vec3 dir, vec3 bgHi, vec3 bgLo) {
 
 // From inside the big sphere, leave through the back face and look at the
 // background. TIR rays bounce back and pick up the far background instead.
-vec3 exitEnv(vec3 ro, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo) {
+vec3 exitEnv(vec3 ro, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo, float detail) {
   float b = dot(ro, rd);
   float cc = dot(ro, ro) - bigRadius * bigRadius;
   float th = -b + sqrt(max(b * b - cc, 0.0));
@@ -774,7 +818,7 @@ vec3 exitEnv(vec3 ro, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo)
     outDir = reflect(rd, -n);
   }
   float thickness = clamp(th / (2.0 * bigRadius), 0.0, 1.0);
-  return bgEnv(outDir, bgHi, bgLo) * mix(0.93, 1.0, thickness);
+  return bgEnv(outDir, bgHi, bgLo, detail) * mix(0.93, 1.0, thickness);
 }
 
 // Where a ray enters a small ball, bends through it and leaves again.
@@ -841,9 +885,9 @@ vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, ve
 
 // A ball seen through another ball: no further lookups behind it.
 vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float bigRadius,
-    vec3 bgHi, vec3 bgLo) {
+    vec3 bgHi, vec3 bgLo, float detail) {
   Lens l = lensThrough(ro, rd, b, th, 1.0 - 0.7 * softness(b, bigRadius));
-  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo);
+  vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
   return ballSurface(ro, rd, l, b, bigRadius, col, behind, bgLo, 0.6);
 }
 
@@ -854,26 +898,26 @@ vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float
 // per-channel work. A channel ray that slips past the ball sees the
 // background, as it would past the ball's rim.
 vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bgHi, vec3 bgLo,
-    Hit near, vec3 nearCol, Hit far, vec3 farCol) {
+    float detail, Hit near, vec3 nearCol, Hit far, vec3 farCol) {
   vec3 rdIn = refract(rd, n1, 1.0 / ior);
   if (dot(rdIn, rdIn) < 0.5) {
     rdIn = rd;
   }
   vec3 ro = p1 + rdIn * 1e-4;
   if (near.index < 0.0) {
-    return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo);
+    return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo, detail);
   }
   float th = sphereHit(ro, rdIn, near.ball.xyz, near.ball.w);
   if (th < 0.0) {
-    return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo);
+    return exitEnv(ro, rdIn, ior, bigRadius, bgHi, bgLo, detail);
   }
   Lens l = lensThrough(ro, rdIn, near.ball, th, 1.0 - 0.7 * softness(near.ball, bigRadius));
   vec3 behind;
   float thFar = far.index < 0.0 ? -1.0 : sphereHit(l.e, l.rdOut, far.ball.xyz, far.ball.w);
   if (thFar > 0.0) {
-    behind = shadeBallFar(far.ball, farCol, l.e, l.rdOut, thFar, ior, bigRadius, bgHi, bgLo);
+    behind = shadeBallFar(far.ball, farCol, l.e, l.rdOut, thFar, ior, bigRadius, bgHi, bgLo, detail);
   } else {
-    behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo);
+    behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo, detail);
   }
   return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
 }
@@ -937,6 +981,11 @@ void main() {
   float ior = 1.0 + u_refraction * 0.6;
   float spread = u_aberration * 0.08 * (0.4 + u_refraction);
 
+  // Reflection falloff: 1 at the rim, fading to (1 - falloff) at the centre.
+  float facing = max(dot(-rd, n1), 0.0);
+  float rimMask = mix(1.0, pow(1.0 - facing, 2.5), u_reflectionFalloff);
+  float detail = u_studioDetail * rimMask;
+
   // Find the nearest ball, and the ball behind it through its lens, once.
   vec3 rdG = refract(rd, n1, 1.0 / ior);
   if (dot(rdG, rdG) < 0.5) {
@@ -960,19 +1009,18 @@ void main() {
   }
 
   vec3 interior = vec3(
-      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, near, nearCol, far, farCol).r,
-      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, near, nearCol, far, farCol).g,
-      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, near, nearCol, far, farCol).b);
+      traceChannel(p1, n1, rd, ior - spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).r,
+      traceChannel(p1, n1, rd, ior, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).g,
+      traceChannel(p1, n1, rd, ior + spread, bigRadius, bgHi, bgLo, detail, near, nearCol, far, farCol).b);
 
-  float facing = max(dot(-rd, n1), 0.0);
   float f0 = (ior - 1.0) / (ior + 1.0);
   f0 *= f0;
   float fres = f0 + (1.0 - f0) * pow(1.0 - facing, 5.0);
-  vec3 color = mix(interior, studioEnvImage(reflect(rd, n1), bgLo), fres * u_reflection);
+  vec3 color = mix(interior, studioEnvImage(reflect(rd, n1), bgLo), fres * u_reflection * rimMask);
 
   vec3 h = normalize(lightDir() - rd);
   float ndh = max(dot(n1, h), 0.0);
-  color += (pow(ndh, 400.0) * 1.2 + pow(ndh, 30.0) * 0.12) * u_highlight;
+  color += (pow(ndh, 400.0) * 1.2 + pow(ndh, 30.0) * 0.12) * u_highlight * rimMask;
 
   // Thick glass at the rim: a darker band just inside a thin bright edge.
   float grazing = pow(1.0 - facing, 3.0);
@@ -981,5 +1029,11 @@ void main() {
   color += rimLine * 0.6 * u_reflection * studioEnv(n1, bgLo);
 
   color = toGamma(color);
+
+  // Text backdrop: a screen-space radial gradient above everything.
+  float backdropR = length(p) / max(screenRadius * u_backdropSize, 1e-4);
+  float backdrop = 1.0 - smoothstep(1.0 - u_backdropSoftness, 1.0, backdropR);
+  color = mix(color, u_backdropColor, backdrop * u_backdropOpacity);
+
   gl_FragColor = vec4(mix(u_outside, color, cover), mix(u_outsideOpacity, 1.0, cover));
 }

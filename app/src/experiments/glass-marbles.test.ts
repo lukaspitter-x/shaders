@@ -43,6 +43,7 @@ describe('glass-marbles.glsl', () => {
 
     expect([...sections.keys()]).toEqual([
       'Sphere',
+      'Text Backdrop',
       'Glass',
       'Environment',
       'Focus',
@@ -56,6 +57,7 @@ describe('glass-marbles.glsl', () => {
       'u_ripple',
       'u_rippleScale',
       'u_reflection',
+      'u_reflectionFalloff',
       'u_highlight',
       'u_lightAngle',
       'u_ballLens',
@@ -83,6 +85,18 @@ describe('glass-marbles.glsl', () => {
     expect(source).toContain('b.w += defocus(b.z, bigRadius);');
     expect(source).toContain('float cover = 1.0 - smoothstep(trueR - blur, trueR + blur, dist);');
     expect(source).toContain('return mix(behind, result, cover);');
+  });
+
+  it('lays a screen-space radial backdrop above the sphere for text', () => {
+    const { schema, defaults } = parseShader(source);
+    for (const key of ['u_backdropColor', 'u_backdropOpacity', 'u_backdropSize', 'u_backdropSoftness']) {
+      expect(schema.find((c) => c.key === key)?.section).toBe('Text Backdrop');
+    }
+    expect(defaults.u_backdropOpacity).toBe(0);
+    // Composited after tone mapping, right before output, so nothing renders over it.
+    const idx = source.indexOf('color = mix(color, u_backdropColor, backdrop * u_backdropOpacity);');
+    expect(idx).toBeGreaterThan(source.indexOf('color = toGamma(color);'));
+    expect(idx).toBeLessThan(source.indexOf('gl_FragColor = vec4(mix(u_outside'));
   });
 
   it('exposes an equirectangular environment map with bundled presets', () => {
@@ -145,7 +159,7 @@ describe('glass-marbles.glsl', () => {
 
     // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
-    expect(colors).toEqual(['u_outside', 'u_keyColor']);
+    expect(colors).toEqual(['u_outside', 'u_backdropColor', 'u_keyColor']);
     expect(defaults.u_keyColor).toBe('#ea5a78');
     expect(schema.find((c) => c.key === 'u_baseHue')).toBeUndefined();
   });
