@@ -28,7 +28,7 @@ describe('glass-marbles.glsl', () => {
     expect(nearBody.slice(0, nearBody.indexOf('\n}\n'))).not.toMatch(/\{[\s\S]*traceChannel\(/);
     // Every loop bound is a compile-time constant.
     for (const m of source.matchAll(/for\s*\([^;]*;\s*\w+\s*<\s*(\w+)/g)) {
-      expect(m[1]).toMatch(/^(\d+|MAX_BALLS|MAX_PARTICLES)$/);
+      expect(m[1]).toMatch(/^(\d+|[A-Z][A-Z_]+)$/);
     }
   });
 
@@ -100,15 +100,20 @@ describe('glass-marbles.glsl', () => {
     expect(idx).toBeLessThan(source.indexOf('gl_FragColor = vec4(mix(u_outside'));
   });
 
-  it('emits particles from the centre that die and stop at the glass', () => {
+  it('emits hundreds of particles from the centre via a sector field', () => {
     const { schema } = parseShader(source);
     const count = schema.find((c) => c.key === 'u_particleCount');
+    const speed = schema.find((c) => c.key === 'u_particleSpeed');
     expect(count?.section).toBe('Particles');
-    if (count?.kind === 'slider') expect(count.max).toBe(32);
-    expect(source).toContain('const int MAX_PARTICLES = 32;');
-    // Born at the centre, straight flight, clamped inside the glass.
-    expect(source).toContain('travel = min(travel, bigRadius * 0.985 - radius);');
-    // Fade in, fade out over the last Particle Fade of the life.
+    expect(speed?.section).toBe('Particles');
+    // Capacity = layers x sectors x slots, matching the Count dial's ceiling.
+    const layers = Number(source.match(/const int P_LAYERS = (\d+);/)?.[1]);
+    const perSector = Number(source.match(/const int P_PER_SECTOR = (\d+);/)?.[1]);
+    const sectors = Number(source.match(/const float P_SECTORS = ([\d.]+);/)?.[1]);
+    if (count?.kind === 'slider') expect(count.max).toBe(layers * sectors * perSector);
+    // Straight flight from the centre, clamped inside the layer's disc.
+    expect(source).toContain('float travel = min(eased * speed * life * bigRadius, layerR * 0.985 - size);');
+    // Fade out over the last Particle Fade of the life.
     expect(source).toContain('float fadeOut = 1.0 - smoothstep(1.0 - u_particleFade, 1.0, age);');
     // Hidden behind the nearest ball.
     expect(source).toContain('float tMax = near.index >= 0.0 ? near.t : 1e9;');
