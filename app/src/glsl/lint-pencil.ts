@@ -164,10 +164,21 @@ export function lintPencil(source: string): LintFinding[] {
     });
   }
 
-  // `@sdf` lives in a comment, so detect it on the original source.
-  const hasSdf = /@sdf\b/.test(source);
-  if (hasSdf) {
-    const gate = /[<]=?\s*0\.0*\b[\s\S]{0,120}?(?:return|vec4\s*\(\s*0)/.exec(code);
+  // `@sdf` lives in a comment, so detect it on the original source. Only a
+  // gate on a value read from the field counts: `if (d <= 0.0) return` where
+  // `d` came from `texture2D(<sdf>, ...)`. Ray-miss exits and other `< 0.0`
+  // early returns in an @sdf shader are not visibility gates.
+  const sdfName = /@sdf\b[\s\S]*?\*\/\s*uniform\s+sampler2D\s+(\w+)/.exec(source)?.[1];
+  if (sdfName) {
+    const gateRe = /(\w+)(?:\.\w+)?\s*<=?\s*0\.0*\b[\s\S]{0,120}?(?:return|vec4\s*\(\s*0)/g;
+    let gate: RegExpExecArray | null = null;
+    for (const m of code.matchAll(gateRe)) {
+      const fromField = new RegExp(`\\b${m[1]}\\s*=\\s*[^;]*texture2D\\(\\s*${sdfName}\\b`);
+      if (fromField.test(code)) {
+        gate = m;
+        break;
+      }
+    }
     if (gate) {
       findings.push({
         severity: 'warning',

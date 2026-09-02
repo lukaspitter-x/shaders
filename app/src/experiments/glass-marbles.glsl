@@ -41,9 +41,10 @@ uniform float u_time;
 uniform float u_fit;
 
 /**
- * Radius of the big sphere relative to the layer. 1 touches the edges.
+ * Radius of the big sphere relative to the layer. 1 touches the layer's
+ * edges: the host circle in the workbench, the layer bounds in Pencil.
  * @label Size
- * @default 0.82
+ * @default 1
  * @range 0.3, 1.2
  */
 uniform float u_size;

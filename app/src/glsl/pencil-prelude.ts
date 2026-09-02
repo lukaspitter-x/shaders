@@ -21,12 +21,19 @@ out vec4 fragColor;
 uniform sampler2D _pencilClip;
 uniform vec2 _pencilClipRes;
 uniform float _pencilClipOn;
+uniform vec2 _pencilOrigin;
+vec4 _pencilFragCoord;
+#define gl_FragCoord _pencilFragCoord
 #define main _pencilUserMain
 `;
 
 export const PENCIL_FRAGMENT_SUFFIX = `
 #undef main
+#undef gl_FragCoord
 void main() {
+  // Layer space: Pencil hands a fill its layer's bounds, so user code sees
+  // coordinates relative to the host shape's box (see webgl-quad.ts).
+  _pencilFragCoord = vec4(gl_FragCoord.xy - _pencilOrigin, gl_FragCoord.zw);
   _pencilUserMain();
   if (_pencilClipOn > 0.5) {
     float _d = texture2D(_pencilClip, gl_FragCoord.xy / _pencilClipRes).r;

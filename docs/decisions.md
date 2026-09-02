@@ -6,6 +6,27 @@ Newest first. Each entry: **what** we decided, **why**, and how to revisit it.
 
 ---
 
+## D11 — The workbench hands non-@sdf fills the host shape's bounds as their layer
+
+**Decided 2026-09-02.** In Pencil a fill's `u_resolution` and `gl_FragCoord`
+are the *layer's*; a fill on a circle layer sees only that circle's box. The
+workbench used to give every shader the whole viewport and merely clip to the
+host shape, so a shape-fitting shader (Glass Marbles) could not follow the
+shape's size dial. Now the renderer derives the shape's bounding box from the
+distance field it already uploads (`sdfBounds`), feeds that box as
+`u_resolution`, offsets `gl_FragCoord` to it in the prelude
+(`#define gl_FragCoord _pencilFragCoord`, set from `_pencilOrigin` in the
+wrapper main), and shifts `@mouse` the same way. The clip still samples in
+canvas space.
+
+**Why not read the field in the shader?** A single `@sdf` lookup per pixel
+cost 12 ms/frame in this register-heavy shader (pure latency), and in Pencil
+it would buy nothing because the layer bounds already are the shape.
+
+**Limits:** `@sdf` shaders keep canvas space, because their field texture is
+canvas-sized; giving them a box-sized field is a follow-up. The box is
+quantised to the field's texel grid (≤ 1 px at SDF_MAX).
+
 ## D10 — Verify heavy shaders with the headless-Chromium bench, not the collaborative preview tab
 
 **Learned 2026-09-02** building Glass Marbles. The collaborative browser tab

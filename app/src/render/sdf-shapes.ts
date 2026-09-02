@@ -17,6 +17,8 @@ export interface ShapeDef {
   id: string;
   label: string;
   custom: boolean;
+  /** False when the shape is defined to cover the viewport and cannot be resized. */
+  scalable?: boolean;
   /** Source image aspect (w/h) for custom uploads — drives fit-to-canvas. */
   aspect?: number;
   /** Custom uploads: the raw SDF grid, for high-quality texture resampling. */
@@ -76,6 +78,7 @@ export const BUILTIN_SHAPES: ShapeDef[] = (
   id,
   label,
   custom: false,
+  scalable: id !== 'full-frame',
   sample: (px: number, py: number) => builtinDistance(id, px, py),
 }));
 
@@ -101,6 +104,37 @@ export function generateSdf(
     }
   }
   return data;
+}
+
+/**
+ * Bounding box of the shape (texels with positive distance) as fractions of
+ * the field's size, `y0` at the bottom row (+py up, gl_FragCoord convention).
+ * Pencil hands a fill its *layer* bounds as `u_resolution`; the workbench
+ * uses this box to emulate that for a host shape. `null` when the field is
+ * empty (no shape / plain rectangle).
+ */
+export function sdfBounds(
+  data: Float32Array,
+  width: number,
+  height: number,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x0: minX / width, y0: minY / height, x1: (maxX + 1) / width, y1: (maxY + 1) / height };
 }
 
 /** A precomputed normalized SDF from an uploaded image (units: fraction of height). */

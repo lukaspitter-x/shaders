@@ -5,6 +5,7 @@
  * + user settings by name. The thin React shell (shader-viewport.tsx) owns the
  * canvas, the clock, and the render loop.
  */
+import { sdfBounds } from './sdf-shapes';
 import type { ParsedShader, ShaderValues } from '@/glsl/parse-annotations';
 import {
   FULLSCREEN_VERTEX,
@@ -51,6 +52,11 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
   // Host-shape SDF texture for `@sdf` fills (R16F, linear). Null until uploaded.
   let sdfTexture: WebGLTexture | null = null;
   let hasSdf = false;
+  // Host-shape bounding box (fractions of the canvas). Pencil hands a fill
+  // its layer's bounds as u_resolution, so shaders WITHOUT @sdf render in
+  // this box (offset gl_FragCoord + box-sized resolution) to match. @sdf
+  // shaders keep canvas space: their field texture is canvas-sized.
+  let layerBounds: { x0: number; y0: number; x1: number; y1: number } | null = null;
 
   // User image textures (sampler2D with @label). Keyed by uniform name.
   // SDF occupies texture unit 0; images start at unit 1; envelopes follow.
@@ -133,9 +139,11 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       }
       gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA16F, width, height, 0, gl!.RGBA, gl!.FLOAT, rgba);
       hasSdf = true;
+      layerBounds = sdfBounds(data, width, height);
     } else {
       gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA16F, 1, 1, 0, gl!.RGBA, gl!.FLOAT, new Float32Array([0, 0, 0, 1]));
       hasSdf = false;
+      layerBounds = null;
     }
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MIN_FILTER, gl!.LINEAR);
     gl!.texParameteri(gl!.TEXTURE_2D, gl!.TEXTURE_MAG_FILTER, gl!.LINEAR);
@@ -237,6 +245,13 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
     gl!.useProgram(program);
     gl!.bindVertexArray(vao);
 
+    // Layer space: the host shape's box for shaders without @sdf, else the canvas.
+    const box = layerBounds && !system.sdf ? layerBounds : null;
+    const originX = box ? Math.round(box.x0 * width) : 0;
+    const originY = box ? Math.round(box.y0 * height) : 0;
+    const layerW = box ? Math.max(1, Math.round((box.x1 - box.x0) * width)) : width;
+    const layerH = box ? Math.max(1, Math.round((box.y1 - box.y0) * height)) : height;
+
     // The SDF lives on texture unit 0 — sampled by `u_shape` (if the shader
     // declares `@sdf`) and by the compositor's `_pencilClip` (layer clip).
     if (sdfTexture) {
@@ -274,13 +289,16 @@ export function createShaderRenderer(canvas: HTMLCanvasElement): ShaderRenderer 
       if (!u.location) continue;
       switch (u.name) {
         case system.resolution:
-          gl!.uniform2f(u.location, width, height);
+          gl!.uniform2f(u.location, layerW, layerH);
           continue;
         case system.time:
           gl!.uniform1f(u.location, time);
           continue;
         case system.mouse:
-          gl!.uniform2f(u.location, mouse[0], mouse[1]);
+          gl!.uniform2f(u.location, mouse[0] - originX, mouse[1] - originY);
+          continue;
+        case '_pencilOrigin':
+          gl!.uniform2f(u.location, originX, originY);
           continue;
         case system.sdf:
         case '_pencilClip':

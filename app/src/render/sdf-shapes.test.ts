@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { resampleSdfBspline, type NormalizedSdf } from './sdf-shapes';
+import {
+  BUILTIN_SHAPES,
+  generateSdf,
+  resampleSdfBspline,
+  sdfBounds,
+  type NormalizedSdf,
+} from './sdf-shapes';
+
+describe('full-frame shape', () => {
+  it('is non-scalable and covers every generated texel', () => {
+    const fullFrame = BUILTIN_SHAPES.find((shape) => shape.id === 'full-frame');
+    expect(fullFrame).toBeDefined();
+    expect(fullFrame?.scalable).toBe(false);
+
+    const sdf = generateSdf(fullFrame!, 32, 18, 32 / 18, 18);
+    for (const distance of sdf) expect(distance).toBeGreaterThan(0);
+  });
+});
 
 /** Build a grid from a function of normalized grid coords (sx right, sy DOWN). */
 function gridFrom(w: number, h: number, f: (sx: number, sy: number) => number): NormalizedSdf {
@@ -62,5 +79,34 @@ describe('resampleSdfBspline', () => {
       expect(v).toBeGreaterThanOrEqual(-1 - 1e-6); // OUTSIDE fill is -1·fit
       expect(v).toBeLessThanOrEqual(1 + 1e-6);
     }
+  });
+});
+
+describe('sdfBounds', () => {
+  it('returns null for an empty field', () => {
+    expect(sdfBounds(new Float32Array(16), 4, 4)).toBeNull();
+  });
+
+  it('boxes the positive texels as fractions, bottom row first', () => {
+    // 4 wide x 4 high; positive texels at (1..2, 1..2) => a centred half-size box.
+    const d = new Float32Array(16);
+    d[1 * 4 + 1] = 1;
+    d[1 * 4 + 2] = 1;
+    d[2 * 4 + 1] = 1;
+    d[2 * 4 + 2] = 1;
+    expect(sdfBounds(d, 4, 4)).toEqual({ x0: 0.25, y0: 0.25, x1: 0.75, y1: 0.75 });
+  });
+
+  it('matches the analytic circle host', () => {
+    const shape = BUILTIN_SHAPES.find((s) => s.id === 'circle')!;
+    const w = 200;
+    const h = 100;
+    const data = generateSdf(shape, w, h, w / h, h);
+    const b = sdfBounds(data, w, h)!;
+    // Circle radius is 0.38 of the height, centred: x spans 0.5 +- 0.19 of 2:1 width.
+    expect(b.y0).toBeCloseTo(0.12, 1);
+    expect(b.y1).toBeCloseTo(0.88, 1);
+    expect(b.x0).toBeCloseTo(0.5 - 0.19, 1);
+    expect(b.x1).toBeCloseTo(0.5 + 0.19, 1);
   });
 });

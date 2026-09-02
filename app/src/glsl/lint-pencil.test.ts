@@ -67,6 +67,11 @@ void main() {
     expect(rules(src)).toContain('sdf-gated-visibility');
   });
 
+  it('does not flag a `< 0.0` early return that is not read from the field', () => {
+    const src = `/** @sdf */\nuniform sampler2D u_shape;\nfloat hit(vec3 ro){ float disc = dot(ro, ro) - 1.0; if (disc < 0.0) { return -1.0; } return disc; }\nvoid main(){ float r = texture2D(u_shape, vec2(0.5)).r; gl_FragColor = vec4(hit(vec3(r))); }`;
+    expect(rules(src)).not.toContain('sdf-gated-visibility');
+  });
+
   it('does not flag discard appearing only in a comment', () => {
     expect(rules('void main(){ /* no discard here */ gl_FragColor = vec4(1.0); }')).not.toContain(
       'no-discard',

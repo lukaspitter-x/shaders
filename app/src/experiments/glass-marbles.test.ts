@@ -6,11 +6,19 @@ import source from './glass-marbles.glsl?raw';
 import { EXPERIMENTS } from './registry';
 
 describe('glass-marbles.glsl', () => {
-  it('is registered as a full-quad fill with no shape dependency', () => {
+  it('is registered as a shape-optional fill that defaults to the circle host', () => {
     const experiment = EXPERIMENTS.find((item) => item.id === 'glass-marbles');
     const { system } = parseShader(source);
 
-    expect(experiment).toMatchObject({ label: 'Glass Marbles', type: 'fill', source });
+    expect(experiment).toMatchObject({
+      label: 'Glass Marbles',
+      type: 'fill',
+      shapeOptional: true,
+      defaultShapeId: 'circle',
+      source,
+    });
+    // No @sdf: a per-pixel field lookup cost 12 ms/frame; the workbench
+    // sizes the layer to the host shape instead (see decisions D11).
     expect(system).toEqual({ resolution: 'u_resolution', time: 'u_time' });
   });
 
