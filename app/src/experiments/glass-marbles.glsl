@@ -55,7 +55,7 @@ uniform float u_outsideOpacity;
  * 1 is a dense crystal ball.
  * @label Distortion
  * @default 0.45
- * @range 0, 1
+ * @range 0, 3
  */
 uniform float u_refraction;
 
@@ -135,10 +135,13 @@ uniform float u_ballDensity;
 uniform float u_count;
 
 /**
- * Radius of the small balls relative to the big sphere.
+ * How much of its private room each ball fills. Every ball owns a slot on
+ * one of a few rings around the whirl axis; the slots never overlap, so
+ * balls can never intersect each other whatever the motion dials do. At 1 a
+ * ball fills its slot and has no room left to move.
  * @label Ball Size
- * @default 0.13
- * @range 0.02, 0.35
+ * @default 0.75
+ * @range 0.2, 1
  */
 uniform float u_ballSize;
 
@@ -185,7 +188,7 @@ uniform float u_swirl;
 uniform float u_vortex;
 
 /**
- * Up-and-down bobbing of each ball.
+ * Up-and-down bobbing of each ball inside its slot.
  * @label Bob
  * @default 0.4
  * @range 0, 1
@@ -193,7 +196,7 @@ uniform float u_vortex;
 uniform float u_bob;
 
 /**
- * Random jitter layered on top of the orbit.
+ * Random jitter of each ball inside its slot.
  * @label Turbulence
  * @default 0.3
  * @range 0, 1
@@ -201,9 +204,10 @@ uniform float u_bob;
 uniform float u_turbulence;
 
 /**
- * How far the balls roam from the centre of the sphere.
+ * How much of the sphere the flock fills. Scales the whole ring layout,
+ * balls included, so they still never touch.
  * @label Spread
- * @default 0.75
+ * @default 0.8
  * @range 0.1, 1
  */
 uniform float u_spread;
@@ -443,6 +447,47 @@ mat3 tiltMatrix() {
   return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c);
 }
 
+// Ball slots. Each ring is (distance from the whirl axis, height, room) in
+// units of the flock radius; a ball lives inside a sphere of radius `room`
+// around its slot point. The rings are chosen so those spheres are disjoint:
+// in the (axis distance, height) half-plane every pair of ring centres is at
+// least room_a + room_b apart (which bounds the 3D distance between any two
+// points of the two rings from below), neighbouring slots on a ring are at
+// least 2 * room apart, and every ring stays inside the unit sphere. The
+// test file checks these numbers, so keep them in this form.
+const vec3 RING_CENTER = vec3(0.0, 0.0, 0.22);
+const vec3 RING_TOP = vec3(0.0, 0.62, 0.2);
+const vec3 RING_BOTTOM = vec3(0.0, -0.62, 0.2);
+const vec3 RING_UPPER = vec3(0.5, 0.35, 0.2);
+const vec3 RING_LOWER = vec3(0.5, -0.35, 0.2);
+const vec3 RING_OUTER = vec3(0.78, 0.0, 0.19);
+const float RING_SLOTS = 7.0;
+
+// Slot for ball i: xyz = ring (distance, height, room), w = slot angle index.
+// Order: the three axis balls first, then the rings interleaved, so the Count
+// dial thins the flock evenly instead of emptying one ring at a time.
+vec4 ballSlot(float fi) {
+  if (fi < 1.0) {
+    return vec4(RING_CENTER, 0.0);
+  }
+  if (fi < 2.0) {
+    return vec4(RING_TOP, 0.0);
+  }
+  if (fi < 3.0) {
+    return vec4(RING_BOTTOM, 0.0);
+  }
+  float j = fi - 3.0;
+  float ring = mod(j, 3.0);
+  float k = floor(j / 3.0);
+  if (ring < 0.5) {
+    return vec4(RING_UPPER, k);
+  }
+  if (ring < 1.5) {
+    return vec4(RING_LOWER, k);
+  }
+  return vec4(RING_OUTER, k);
+}
+
 // Small ball i at time t: xyz = centre (world units), w = radius.
 vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   vec2 seed = vec2(fi * 7.31 + 3.0, u_layoutSeed * 2.11 + 1.0);
@@ -452,23 +497,32 @@ vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
   float h4 = hash(seed + 23.0);
   float h5 = hash(seed + 37.0);
 
-  float radius = u_ballSize * bigRadius * mix(1.0, mix(0.4, 1.5, h5), u_sizeVariation);
-  float usable = max(bigRadius - radius * 1.05, 0.0);
+  vec4 slot = ballSlot(fi);
+  float rho = slot.x;
+  float room = slot.z;
 
-  float rho = mix(0.15, 1.0, h1);
-  float rate = u_swirl * mix(1.0, 1.6 - rho, u_vortex);
-  float ang = h3 * TAU + t * rate;
-  float y = (h2 * 2.0 - 1.0) * 0.85 + u_bob * 0.35 * sin(t * (0.6 + h4) + h3 * TAU);
+  // Each ring turns as a whole (its balls keep their spacing); rings at
+  // different distances turn at different rates, and the lower ring lags the
+  // upper so the two slide past each other.
+  float ringSeed = hash(vec2(rho * 13.0 + slot.y * 7.0, u_layoutSeed * 0.53 + 2.0));
+  float rate = u_swirl * mix(1.0, 1.6 - rho, u_vortex) * (slot.y < 0.0 ? 0.8 : 1.0);
+  float ang = ringSeed * TAU + slot.w * TAU / RING_SLOTS + t * rate;
+  vec3 pos = vec3(rho * cos(ang), slot.y, rho * sin(ang));
 
-  vec3 pos = vec3(rho * cos(ang), y, rho * sin(ang)) * u_spread;
-  pos += u_turbulence * 0.18 * vec3(
+  float radius = room * u_ballSize * mix(1.0, mix(0.45, 1.0, h5), u_sizeVariation);
+
+  // Wander inside the slot, never further than the room left around the ball.
+  vec3 wander = u_turbulence * vec3(
       sin(t * 1.7 + h4 * 9.0),
       cos(t * 1.3 + h1 * 7.0),
       sin(t * 1.1 + h2 * 5.0));
+  wander.y += u_bob * sin(t * (0.6 + h4) + h3 * TAU);
+  wander /= max(1.0, length(wander));
+  pos += wander * (room - radius) * 0.95;
 
-  pos = pos / max(1.0, length(pos)) * usable;
-  pos = tilt * pos;
-  return vec4(pos, radius);
+  float scale = bigRadius * u_spread;
+  pos = tilt * (pos * scale);
+  return vec4(pos, radius * scale);
 }
 
 // Nearest forward hit of a sphere, or -1.

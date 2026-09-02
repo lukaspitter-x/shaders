@@ -113,3 +113,49 @@ describe('glass-marbles.glsl', () => {
     expect(colors).toEqual(['u_outside']);
   });
 });
+
+describe('glass-marbles.glsl ball slots', () => {
+  // Mirror of the ring table: balls may never intersect because every slot's
+  // envelope (a sphere of radius `room` around the slot point) is disjoint
+  // from every other. Extracted from the shader so the two cannot drift.
+  const rings = [...source.matchAll(/const vec3 RING_\w+ = vec3\(([^)]+)\);/g)].map((m) =>
+    m[1].split(',').map((v) => Number(v.trim())),
+  );
+  const slots = Number(source.match(/const float RING_SLOTS = ([\d.]+);/)?.[1]);
+
+  it('declares six rings and a slot count', () => {
+    expect(rings).toHaveLength(6);
+    expect(slots).toBe(7);
+  });
+
+  it('keeps every ring envelope inside the unit flock sphere', () => {
+    for (const [rho, y, room] of rings) {
+      expect(Math.hypot(rho, y) + room).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('keeps ring envelopes apart from each other', () => {
+    for (let a = 0; a < rings.length; a++) {
+      for (let b = a + 1; b < rings.length; b++) {
+        const [ra, ya, rooma] = rings[a];
+        const [rb, yb, roomb] = rings[b];
+        expect(Math.hypot(ra - rb, ya - yb)).toBeGreaterThanOrEqual(rooma + roomb);
+      }
+    }
+  });
+
+  it('keeps neighbouring slots on a ring apart', () => {
+    for (const [rho, , room] of rings) {
+      if (rho === 0) continue; // axis balls are single slots
+      const chord = 2 * rho * Math.sin(Math.PI / slots);
+      expect(chord).toBeGreaterThanOrEqual(2 * room);
+    }
+  });
+
+  it('never lets a ball leave its envelope', () => {
+    // radius = room * size * variation ≤ room; wander ≤ (room - radius) * 0.95.
+    expect(source).toContain('float radius = room * u_ballSize * mix(1.0, mix(0.45, 1.0, h5), u_sizeVariation);');
+    expect(source).toContain('wander /= max(1.0, length(wander));');
+    expect(source).toContain('pos += wander * (room - radius) * 0.95;');
+  });
+});
