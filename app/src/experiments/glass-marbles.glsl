@@ -10,11 +10,17 @@
  * interior is traced three times with slightly different refractive indices
  * for R, G and B, which is what gives the chromatic aberration fringes.
  *
- * Colour harmony: ball colours are not picked directly. A base hue, a
+ * Colour harmony: ball colours are not picked directly. One key colour, a
  * harmony scheme and a seed generate an OKLCH palette (analogous, triadic,
- * tetradic, ...), so every combination stays in tune. The sphere's inner
- * background is a pale tint from the same harmony. Spin the seeds to
- * randomise colours or layout without leaving the scheme.
+ * tetradic, ...) around the key's hue, chroma and lightness, so every
+ * combination stays in tune. The sphere's inner background is a pale tint
+ * from the same harmony. Spin the seeds to randomise colours or layout
+ * without leaving the scheme.
+ *
+ * Environment: a procedural studio (sky, floor, key light, softbox windows)
+ * is reflected by every glass surface and, faintly, seen through the sphere
+ * so the refraction has something to bend. An equirectangular environment
+ * image can replace it for reflections and/or the view through the glass.
  */
 
 /** @resolution */
@@ -110,26 +116,88 @@ uniform float u_lightAngle;
 /**
  * How much each small ball acts as a lens for what is behind it.
  * @label Ball Lens
- * @default 0.5
+ * @default 0.7
  * @range 0, 1
  */
 uniform float u_ballLens;
 
 /**
- * How dense the colour of the small balls is. Low is a faint tinted bubble,
- * high is a saturated gel ball.
- * @label Ball Density
- * @default 0.6
- * @range 0, 1
+ * Depth of the colour tint of the glass balls, like stained glass: a faint
+ * tint at low values, deep saturated glass at high ones. Always transmits.
+ * @label Ball Tint
+ * @default 0.8
+ * @range 0, 2
  */
 uniform float u_ballDensity;
+
+// SECTION: Environment
+/**
+ * Softbox windows in the procedural studio. They show in the reflections
+ * and, bent, through the glass, which is what makes the refraction visible.
+ * @label Studio Detail
+ * @default 0.5
+ * @range 0, 1
+ */
+uniform float u_studioDetail;
+
+/**
+ * Optional equirectangular environment image (2:1 panorama).
+ * @label Environment Map
+ * @assets env
+ */
+uniform sampler2D u_env;
+
+/**
+ * How much the environment image replaces the procedural studio in the
+ * reflections on the sphere and the balls. Needs an image.
+ * @label Env Reflection
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_envMix;
+
+/**
+ * How much the environment image shows through the glass behind the balls,
+ * instead of the tinted background. Needs an image.
+ * @label Env Through Glass
+ * @default 0
+ * @range 0, 1
+ */
+uniform float u_envThrough;
+
+/**
+ * Turns the environment image around the sphere, degrees.
+ * @label Env Rotation
+ * @default 0
+ * @range 0, 360
+ */
+uniform float u_envRotation;
+
+// SECTION: Focus
+/**
+ * Shallow depth of field: balls away from the focus plane swell and soften
+ * like bokeh.
+ * @label Depth Of Field
+ * @default 0.35
+ * @range 0, 1
+ */
+uniform float u_bokeh;
+
+/**
+ * Where the sharp plane sits, from the back of the sphere (-1) to its front
+ * (1).
+ * @label Focus
+ * @default 0.5
+ * @range -1, 1
+ */
+uniform float u_focus;
 
 // SECTION: Balls
 /**
  * Number of small balls inside the sphere.
  * @label Count
- * @default 18
- * @range 1, 24
+ * @default 14
+ * @range 1, 16
  * @step 1
  */
 uniform float u_count;
@@ -138,9 +206,10 @@ uniform float u_count;
  * How much of its private room each ball fills. Every ball owns a slot on
  * one of a few rings around the whirl axis; the slots never overlap, so
  * balls can never intersect each other whatever the motion dials do. At 1 a
- * ball fills its slot and has no room left to move.
+ * ball fills its slot and has no room left to move; the three balls on the
+ * axis are kept a little smaller so they can drift.
  * @label Ball Size
- * @default 0.75
+ * @default 0.65
  * @range 0.2, 1
  */
 uniform float u_ballSize;
@@ -196,9 +265,10 @@ uniform float u_vortex;
 uniform float u_bob;
 
 /**
- * Random jitter of each ball inside its slot.
+ * How freely each ball wanders inside its slot: a slow drift plus a faster
+ * jitter, both with their own random rhythm per ball.
  * @label Turbulence
- * @default 0.3
+ * @default 0.7
  * @range 0, 1
  */
 uniform float u_turbulence;
@@ -230,12 +300,13 @@ uniform float u_tilt;
 uniform float u_harmony;
 
 /**
- * Hue the harmony is built around, degrees on the OKLCH wheel.
- * @label Base Hue
- * @default 20
- * @range 0, 360
+ * The one colour everything else is derived from: the harmony hues fan out
+ * from its hue, and the balls start from its lightness and saturation.
+ * @label Key Colour
+ * @color
+ * @default #ea5a78
  */
-uniform float u_baseHue;
+uniform vec3 u_keyColor;
 
 /**
  * Reshuffles which harmony hue each ball gets. Spin to randomise the colours.
@@ -255,18 +326,19 @@ uniform float u_colorSeed;
 uniform float u_hueSpread;
 
 /**
- * Colourfulness of the balls.
+ * Colourfulness of the balls relative to the key colour. 0 keeps it, -1 is
+ * grey, 1 doubles it.
  * @label Saturation
- * @default 0.8
- * @range 0, 1
+ * @default 0
+ * @range -1, 1
  */
 uniform float u_saturation;
 
 /**
- * Lightness of the balls.
+ * Lightness of the balls relative to the key colour.
  * @label Brightness
- * @default 0.7
- * @range 0, 1
+ * @default 0
+ * @range -1, 1
  */
 uniform float u_brightness;
 
@@ -303,7 +375,10 @@ uniform float u_bgTint;
  */
 uniform float u_bgBrightness;
 
-const int MAX_BALLS = 24;
+// 16 is a hard ceiling from the Metal compiler: the ball loops are fully
+// unrolled up to 16 iterations and keep the ball array in registers; at 17
+// the array falls into memory and the whole shader runs four times slower.
+const int MAX_BALLS = 16;
 const float TAU = 6.28318530718;
 const float CAMERA_DIST = 5.0;
 
@@ -322,6 +397,27 @@ vec3 unoklab(vec3 lab) {
       +0.230759054, -0.341134429, +1.706862569);
   vec3 lms = m1 * lab;
   return m2 * (lms * lms * lms);
+}
+
+vec3 toLinear(vec3 c) {
+  return pow(c, vec3(2.2));
+}
+
+vec3 oklab(vec3 lin) {
+  const mat3 im1 = mat3(0.4121656120, 0.2118591070, 0.0883097947,
+      0.5362752080, 0.6807189584, 0.2818474174,
+      0.0514575653, 0.1074065790, 0.6302613616);
+  const mat3 im2 = mat3(+0.2104542553, +1.9779984951, +0.0259040371,
+      +0.7936177850, -2.4285922050, +0.7827717662,
+      -0.0040720468, +0.4505937099, -0.8086757660);
+  vec3 lms = im1 * lin;
+  return im2 * (sign(lms) * pow(abs(lms), vec3(1.0 / 3.0)));
+}
+
+// The key colour as OKLCH: x = lightness, y = chroma, z = hue in degrees.
+vec3 keyLch() {
+  vec3 lab = oklab(toLinear(u_keyColor));
+  return vec3(lab.x, length(lab.yz), degrees(atan(lab.z, lab.y)));
 }
 
 bool inGamut(vec3 lin) {
@@ -371,6 +467,14 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+// Four hashes of one seed in a single vector op (the ball loop runs once per
+// ball per pixel, so its body is kept as small as possible; sin() is a fast
+// hardware intrinsic on the GPUs this runs on, cheaper than trig-free hashes).
+vec4 hash4(vec2 p) {
+  vec4 q = vec4(p.x * 127.1 + p.y * 311.7) + vec4(0.0, 1553.5, 5697.2, 9843.9);
+  return fract(sin(q) * 43758.5453);
+}
+
 // Hue offset (degrees) of harmony slot 0..3 for the selected scheme.
 float harmonyOffset(float slot, float fan) {
   if (u_harmony < 0.5) {
@@ -418,24 +522,26 @@ vec3 ballColor(float fi) {
   float hLum = hash(seed + 29.0);
   float hChr = hash(seed + 43.0);
 
+  vec3 key = keyLch();
   float fan = mix(10.0, 60.0, u_hueSpread);
   float slot = floor(hSlot * harmonySlots());
-  float hue = u_baseHue + harmonyOffset(slot, fan) + (hJit - 0.5) * fan * 0.5;
+  float hue = key.z + harmonyOffset(slot, fan) + (hJit - 0.5) * fan * 0.5;
 
-  float l = mix(0.4, 0.92, u_brightness) + (hLum - 0.5) * 0.3 * u_variation;
-  float c = u_saturation * 0.2 * (1.0 + (hChr - 0.5) * 0.8 * u_variation);
+  float l = key.x + u_brightness * 0.35 + (hLum - 0.5) * 0.3 * u_variation;
+  float c = key.y * (1.0 + u_saturation) * (1.0 + (hChr - 0.5) * 0.8 * u_variation);
   return oklchFast(clamp(l, 0.05, 0.98), max(c, 0.0), hue);
 }
 
 float backgroundHue() {
+  float keyHue = keyLch().z;
   if (u_bgHueMode < 0.5) {
-    return u_baseHue;
+    return keyHue;
   }
   if (u_bgHueMode < 1.5) {
-    return u_baseHue + 180.0;
+    return keyHue + 180.0;
   }
   float slot = floor(hash(vec2(u_colorSeed * 0.37 + 3.0, 9.0)) * harmonySlots());
-  return u_baseHue + harmonyOffset(slot, mix(10.0, 60.0, u_hueSpread));
+  return keyHue + harmonyOffset(slot, mix(10.0, 60.0, u_hueSpread));
 }
 
 // ---------------------------------------------------------------- scene ---
@@ -458,10 +564,10 @@ mat3 tiltMatrix() {
 const vec3 RING_CENTER = vec3(0.0, 0.0, 0.22);
 const vec3 RING_TOP = vec3(0.0, 0.62, 0.2);
 const vec3 RING_BOTTOM = vec3(0.0, -0.62, 0.2);
-const vec3 RING_UPPER = vec3(0.5, 0.35, 0.2);
-const vec3 RING_LOWER = vec3(0.5, -0.35, 0.2);
+const vec3 RING_UPPER = vec3(0.5, 0.35, 0.24);
+const vec3 RING_LOWER = vec3(0.5, -0.35, 0.24);
 const vec3 RING_OUTER = vec3(0.78, 0.0, 0.19);
-const float RING_SLOTS = 7.0;
+const float RING_SLOTS = 5.0;
 
 // Slot for ball i: xyz = ring (distance, height, room), w = slot angle index.
 // Order: the three axis balls first, then the rings interleaved, so the Count
@@ -488,35 +594,41 @@ vec4 ballSlot(float fi) {
   return vec4(RING_OUTER, k);
 }
 
+// Circle of confusion (world units) for a ball centred at depth z.
+float defocus(float z, float bigRadius) {
+  return u_bokeh * 0.18 * abs(z - u_focus * bigRadius);
+}
+
 // Small ball i at time t: xyz = centre (world units), w = radius.
 vec4 ball(float fi, float t, float bigRadius, mat3 tilt) {
-  vec2 seed = vec2(fi * 7.31 + 3.0, u_layoutSeed * 2.11 + 1.0);
-  float h1 = hash(seed);
-  float h2 = hash(seed + 5.0);
-  float h3 = hash(seed + 13.0);
-  float h4 = hash(seed + 23.0);
-  float h5 = hash(seed + 37.0);
+  vec4 h = hash4(vec2(fi * 7.31 + 3.0, u_layoutSeed * 2.11 + 1.0));
+  vec4 g = hash4(vec2(fi * 3.77 + 9.0, u_layoutSeed * 1.37 + 4.0));
 
   vec4 slot = ballSlot(fi);
   float rho = slot.x;
   float room = slot.z;
 
   // Each ring turns as a whole (its balls keep their spacing); rings at
-  // different distances turn at different rates, and the lower ring lags the
-  // upper so the two slide past each other.
+  // different distances turn at different rates, the lower ring lags the
+  // upper so the two slide past each other, and every ring breathes: it
+  // speeds up and slows down on its own slow rhythm.
   float ringSeed = hash(vec2(rho * 13.0 + slot.y * 7.0, u_layoutSeed * 0.53 + 2.0));
   float rate = u_swirl * mix(1.0, 1.6 - rho, u_vortex) * (slot.y < 0.0 ? 0.8 : 1.0);
-  float ang = ringSeed * TAU + slot.w * TAU / RING_SLOTS + t * rate;
+  float wobble = 0.4 * sin(t * (0.12 + 0.18 * ringSeed) + ringSeed * TAU);
+  float ang = ringSeed * TAU + slot.w * TAU / RING_SLOTS + t * rate * (1.0 + wobble);
   vec3 pos = vec3(rho * cos(ang), slot.y, rho * sin(ang));
 
-  float radius = room * u_ballSize * mix(1.0, mix(0.45, 1.0, h5), u_sizeVariation);
+  // Balls on the axis have no ring to ride, so leave them more room to drift.
+  float axisShrink = rho < 0.01 ? 0.72 : 1.0;
+  float radius = room * axisShrink * u_ballSize * mix(1.0, mix(0.45, 1.0, h.w), u_sizeVariation);
 
-  // Wander inside the slot, never further than the room left around the ball.
-  vec3 wander = u_turbulence * vec3(
-      sin(t * 1.7 + h4 * 9.0),
-      cos(t * 1.3 + h1 * 7.0),
-      sin(t * 1.1 + h2 * 5.0));
-  wander.y += u_bob * sin(t * (0.6 + h4) + h3 * TAU);
+  // Wander inside the slot, never further than the room left around the
+  // ball: a slow three-axis drift with random rhythms per ball, a faster
+  // jitter, and the bob on top.
+  vec3 drift = sin(t * (vec3(0.25, 0.2, 0.3) + vec3(0.4, 0.35, 0.4) * h.xyz) + g.xyz * TAU);
+  vec3 jitter = 0.35 * sin(t * (vec3(1.4, 1.1, 1.6) + vec3(1.2, 1.3, 0.9) * g.yzw) + h.yzx * TAU);
+  vec3 wander = u_turbulence * (drift + jitter);
+  wander.y += u_bob * sin(t * (0.6 + g.w) + h.z * TAU);
   wander /= max(1.0, length(wander));
   pos += wander * (room - radius) * 0.95;
 
@@ -572,20 +684,64 @@ vec3 lightDir() {
   return normalize(vec3(cos(a), sin(a), 0.9));
 }
 
-// Soft studio the glass reflects: dim floor, bright sky, one key light.
+// One soft rectangular light seen in direction `dir`, centred at the given
+// azimuth / elevation (degrees) with the given angular half-size.
+float softbox(vec2 azEl, vec2 centre, vec2 halfSize) {
+  vec2 d = abs(azEl - centre);
+  d.x = min(d.x, 360.0 - d.x);
+  vec2 inside = 1.0 - smoothstep(halfSize * 0.7, halfSize, d);
+  return inside.x * inside.y;
+}
+
+// Three softbox windows around the key light: the structure the glass bends.
+float softboxes(vec3 dir) {
+  vec2 azEl = vec2(degrees(atan(dir.x, -dir.z)), degrees(asin(clamp(dir.y, -1.0, 1.0))));
+  float keyAz = u_lightAngle - 90.0;
+  float w = softbox(azEl, vec2(keyAz, 30.0), vec2(22.0, 28.0));
+  w += 0.7 * softbox(azEl, vec2(keyAz + 110.0, 10.0), vec2(14.0, 40.0));
+  w += 0.5 * softbox(azEl, vec2(keyAz - 130.0, -5.0), vec2(30.0, 12.0));
+  return w;
+}
+
+// Equirectangular environment image lookup. Image samplers are Y-flipped.
+vec3 envImage(vec3 dir) {
+  float az = atan(dir.x, -dir.z) + radians(u_envRotation);
+  vec2 uv = vec2(fract(az / TAU + 0.5), 0.5 + asin(clamp(dir.y, -1.0, 1.0)) / 3.14159265);
+  uv.y = 1.0 - uv.y;
+  return texture2D(u_env, uv).rgb;
+}
+
+// Studio the glass reflects: dim floor, bright sky, key light, softboxes.
 vec3 studioEnv(vec3 dir, vec3 bgLo) {
   float sky = smoothstep(-0.6, 0.8, dir.y);
   vec3 c = mix(bgLo * 0.75, vec3(1.0), sky);
   float spot = pow(max(dot(dir, lightDir()), 0.0), 20.0);
-  return c + spot * 0.9;
+  return c + spot * 0.9 + softboxes(dir) * u_studioDetail * 0.8;
 }
 
-// The background that fills the inside of the big sphere.
+// The studio with the environment image blended in. Used for the sphere's
+// main reflection only: every image lookup is a latency stall in a shader
+// this register-heavy, so the small balls reflect the procedural studio.
+vec3 studioEnvImage(vec3 dir, vec3 bgLo) {
+  vec3 c = studioEnv(dir, bgLo);
+  if (u_envMix > 0.001) {
+    c = mix(c, envImage(dir) * 1.15, u_envMix);
+  }
+  return c;
+}
+
+// The background that fills the inside of the big sphere: the tint
+// gradient with the softboxes faintly in it, optionally the image itself.
 vec3 bgEnv(vec3 dir, vec3 bgHi, vec3 bgLo) {
   float v = smoothstep(-0.9, 0.9, dir.y);
   vec3 c = mix(bgLo, bgHi, v);
   float glow = pow(max(dot(dir, lightDir()), 0.0), 3.0);
-  return c + glow * 0.18 * bgHi;
+  c += glow * 0.18 * bgHi;
+  c *= 1.0 - u_studioDetail * 0.3 + softboxes(dir) * u_studioDetail * 0.45;
+  if (u_envThrough > 0.001) {
+    c = mix(c, envImage(dir) * mix(vec3(1.0), bgHi, 0.35), u_envThrough);
+  }
+  return c;
 }
 
 // From inside the big sphere, leave through the back face and look at the
@@ -633,18 +789,35 @@ Lens lensThrough(vec3 ro, vec3 rd, vec4 b, float th) {
 
 // A small ball's surface: what is behind it tinted by its gel colour, a rim
 // of studio reflection and a key-light highlight.
-vec3 ballSurface(vec3 rd, Lens l, float radius, vec3 col, vec3 behind, vec3 bgLo) {
-  float density = u_ballDensity * 1.4 * l.chord / radius;
-  vec3 transmit = pow(max(col, vec3(0.001)), vec3(density));
-  vec3 result = behind * transmit + col * (1.0 - transmit) * 0.3;
+// `b` is the ball as traced (its radius already grown by the circle of
+// confusion); `tintScale` softens the tint of balls seen through others.
+vec3 ballSurface(vec3 ro, vec3 rd, Lens l, vec4 b, float bigRadius, vec3 col, vec3 behind,
+    vec3 bgLo, float tintScale) {
+  // Beer-Lambert through coloured glass: the path length through the ball
+  // (0 at the rim, 1 through the centre) scales the tint depth.
+  float path = clamp(l.chord / (2.0 * b.w), 0.0, 1.0);
+  vec3 transmit = pow(max(col, vec3(0.02)), vec3(u_ballDensity * 1.5 * path * tintScale));
+  vec3 result = behind * transmit + col * (1.0 - transmit) * 0.12;
 
   float facing = max(dot(-rd, l.n), 0.0);
-  float fres = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
-  result = mix(result, studioEnv(reflect(rd, l.n), bgLo), fres * u_reflection);
+  float fres = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+  result = mix(result, studioEnv(reflect(rd, l.n), bgLo), fres * u_reflection * 0.55);
+
+  // Bokeh: the ball was traced with its radius grown by the circle of
+  // confusion; fade its edge across that band so it reads as out of focus,
+  // and spread the highlight the same way.
+  float blur = max(defocus(b.z, bigRadius), 1e-4);
+  float trueR = b.w - blur;
+  vec3 oc = ro - b.xyz;
+  float along = dot(oc, rd);
+  float dist = sqrt(max(dot(oc, oc) - along * along, 0.0));
+  float cover = 1.0 - smoothstep(trueR - blur, trueR + blur, dist);
 
   vec3 h = normalize(lightDir() - rd);
-  float spec = pow(max(dot(l.n, h), 0.0), 90.0);
-  return result + spec * u_highlight * 0.8;
+  float sharpness = 90.0 / (1.0 + 8.0 * blur / max(trueR, 1e-4));
+  float spec = pow(max(dot(l.n, h), 0.0), sharpness) * (sharpness / 90.0);
+  result += spec * u_highlight * 0.8;
+  return mix(behind, result, cover);
 }
 
 // A ball seen through another ball: no further lookups behind it.
@@ -652,7 +825,7 @@ vec3 shadeBallFar(vec4 b, vec3 col, vec3 ro, vec3 rd, float th, float ior, float
     vec3 bgHi, vec3 bgLo) {
   Lens l = lensThrough(ro, rd, b, th);
   vec3 behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo);
-  return ballSurface(rd, l, b.w, col, behind, bgLo);
+  return ballSurface(ro, rd, l, b, bigRadius, col, behind, bgLo, 0.6);
 }
 
 // One colour channel's view into the sphere. The near and far balls were
@@ -683,7 +856,7 @@ vec3 traceChannel(vec3 p1, vec3 n1, vec3 rd, float ior, float bigRadius, vec3 bg
   } else {
     behind = exitEnv(l.e, l.rdOut, ior, bigRadius, bgHi, bgLo);
   }
-  return ballSurface(rdIn, l, near.ball.w, nearCol, behind, bgLo);
+  return ballSurface(ro, rdIn, l, near.ball, bigRadius, nearCol, behind, bgLo, 1.0);
 }
 
 void main() {
@@ -734,7 +907,12 @@ void main() {
   vec4 balls[MAX_BALLS];
   mat3 tilt = tiltMatrix();
   for (int i = 0; i < MAX_BALLS; i++) {
-    balls[i] = ball(float(i), t, bigRadius, tilt);
+    vec4 b = vec4(0.0, 0.0, 0.0, -1.0);
+    if (float(i) < u_count) {
+      b = ball(float(i), t, bigRadius, tilt);
+      b.w += defocus(b.z, bigRadius);
+    }
+    balls[i] = b;
   }
 
   float ior = 1.0 + u_refraction * 0.6;
@@ -771,7 +949,7 @@ void main() {
   float f0 = (ior - 1.0) / (ior + 1.0);
   f0 *= f0;
   float fres = f0 + (1.0 - f0) * pow(1.0 - facing, 5.0);
-  vec3 color = mix(interior, studioEnv(reflect(rd, n1), bgLo), fres * u_reflection);
+  vec3 color = mix(interior, studioEnvImage(reflect(rd, n1), bgLo), fres * u_reflection);
 
   vec3 h = normalize(lightDir() - rd);
   float ndh = max(dot(n1, h), 0.0);

@@ -41,7 +41,15 @@ describe('glass-marbles.glsl', () => {
       sections.set(control.section ?? '', list);
     }
 
-    expect([...sections.keys()]).toEqual(['Sphere', 'Glass', 'Balls', 'Motion', 'Palette']);
+    expect([...sections.keys()]).toEqual([
+      'Sphere',
+      'Glass',
+      'Environment',
+      'Focus',
+      'Balls',
+      'Motion',
+      'Palette',
+    ]);
     expect(sections.get('Glass')).toEqual([
       'u_refraction',
       'u_aberration',
@@ -62,6 +70,30 @@ describe('glass-marbles.glsl', () => {
       'u_spread',
       'u_tilt',
     ]);
+  });
+
+  it('grows out-of-focus balls by a circle of confusion and fades their edge', () => {
+    const { schema, defaults } = parseShader(source);
+    expect(schema.find((c) => c.key === 'u_bokeh')?.section).toBe('Focus');
+    expect(schema.find((c) => c.key === 'u_focus')?.section).toBe('Focus');
+    expect(defaults.u_focus).toBe(0.5);
+    expect(source).toContain('b.w += defocus(b.z, bigRadius);');
+    expect(source).toContain('float cover = 1.0 - smoothstep(trueR - blur, trueR + blur, dist);');
+    expect(source).toContain('return mix(behind, result, cover);');
+  });
+
+  it('exposes an equirectangular environment map with bundled presets', () => {
+    const { schema, images } = parseShader(source);
+    const env = schema.find((c) => c.key === 'u_env');
+    expect(images).toEqual(['u_env']);
+    expect(env?.kind).toBe('image');
+    expect(env?.section).toBe('Environment');
+    if (env?.kind === 'image') expect(env.assets).toBe('env');
+    for (const key of ['u_envMix', 'u_envThrough', 'u_envRotation', 'u_studioDetail']) {
+      expect(schema.find((c) => c.key === key)?.section).toBe('Environment');
+    }
+    // One sampler only, so textureSize is never needed and never used.
+    expect(source).not.toContain('textureSize');
   });
 
   it('derives colours from a harmony scheme plus randomisable seeds', () => {
@@ -102,15 +134,17 @@ describe('glass-marbles.glsl', () => {
     expect(count?.kind).toBe('slider');
     if (count?.kind === 'slider') {
       expect(count.min).toBe(1);
-      expect(count.max).toBe(24);
+      expect(count.max).toBe(16);
       expect(count.step).toBe(1);
     }
     // The shader loop is sized to the slider's ceiling.
-    expect(source).toContain('const int MAX_BALLS = 24;');
+    expect(source).toContain('const int MAX_BALLS = 16;');
 
-    // No direct ball colours: harmony + base hue is the only colour input.
+    // No direct ball colours: one key colour + harmony is the only colour input.
     const colors = schema.filter((c) => c.kind === 'color').map((c) => c.key);
-    expect(colors).toEqual(['u_outside']);
+    expect(colors).toEqual(['u_outside', 'u_keyColor']);
+    expect(defaults.u_keyColor).toBe('#ea5a78');
+    expect(schema.find((c) => c.key === 'u_baseHue')).toBeUndefined();
   });
 });
 
@@ -125,7 +159,9 @@ describe('glass-marbles.glsl ball slots', () => {
 
   it('declares six rings and a slot count', () => {
     expect(rings).toHaveLength(6);
-    expect(slots).toBe(7);
+    expect(slots).toBe(5);
+    // 3 axis slots + 3 rings x 5 slots must cover the ball ceiling.
+    expect(3 + 3 * slots).toBeGreaterThanOrEqual(16);
   });
 
   it('keeps every ring envelope inside the unit flock sphere', () => {
@@ -154,7 +190,10 @@ describe('glass-marbles.glsl ball slots', () => {
 
   it('never lets a ball leave its envelope', () => {
     // radius = room * size * variation ≤ room; wander ≤ (room - radius) * 0.95.
-    expect(source).toContain('float radius = room * u_ballSize * mix(1.0, mix(0.45, 1.0, h5), u_sizeVariation);');
+    expect(source).toContain(
+      'float radius = room * axisShrink * u_ballSize * mix(1.0, mix(0.45, 1.0, h.w), u_sizeVariation);',
+    );
+    expect(source).toContain('float axisShrink = rho < 0.01 ? 0.72 : 1.0;');
     expect(source).toContain('wander /= max(1.0, length(wander));');
     expect(source).toContain('pos += wander * (room - radius) * 0.95;');
   });

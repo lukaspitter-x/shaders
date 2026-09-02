@@ -28,6 +28,18 @@ cheap in-app cross-check. Budget: ≤ 16 ms/frame at 2560×1600 with defaults.
 - Chromatic aberration by tracing R/G/B separately triples the cost. Find the
   hit objects once with the green ray and intersect each channel's ray against
   only those — fringes stay, the search loops don't multiply (77 → 9 ms).
+- **A per-pixel scene array has a hard size cliff on Metal.** With a heavier
+  loop body the ball loops were fully unrolled (array in registers) only up to
+  **16 iterations**; at 17 the array fell into memory and the shader went from
+  ~8 to ~32 ms/frame, regardless of splitting arrays, manual unrolling, or
+  recomputing instead of storing (the compiler merges identical recomputes back
+  into one stored set). Bisect by shrinking the constant, not by stubbing ALU.
+- `sin()` is a fast hardware intrinsic on Apple GPUs. Replacing sine hashes and
+  oscillators with "cheap" trig-free versions made the shader *slower*
+  (11 → 22 ms). Don't micro-optimise transcendentals there without measuring.
+- Every image lookup in a register-heavy shader is a latency stall (14 env
+  lookups/pixel cost 30 ms with no bandwidth pressure at all). Feed the image
+  to the few sites that matter and let the rest use procedural light.
 
 ## D8 — Pencil is strictly WebGL 1.0 / ES 1.00; the preview is more permissive → we must LINT to Pencil
 
